@@ -145,6 +145,8 @@ pub struct SelectStatement {
     pub select_list: Vec<SelectItem>,
     /// FROM clause with table/entity sources
     pub from: Option<FromClause>,
+    /// TRAVERSE clause for graph patterns
+    pub traverse_clause: Option<TraverseClause>,
     /// WHERE clause for filtering
     pub where_clause: Option<Expression>,
     /// GROUP BY expressions
@@ -312,4 +314,70 @@ pub struct Assignment {
 pub struct DeleteStatement {
     pub table: String,
     pub where_clause: Option<Expression>,
+}
+
+/// TRAVERSE clause for graph pattern matching
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TraverseClause {
+    /// List of graph patterns to match
+    pub patterns: Vec<TraversePattern>,
+}
+
+/// Individual graph pattern in Cypher-style syntax
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TraversePattern {
+    /// Start node specification
+    pub start_node: NodePattern,
+    /// Relationship specification
+    pub relationship: RelationshipPattern,
+    /// End node specification
+    pub end_node: NodePattern,
+}
+
+/// Node pattern in graph traversal
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodePattern {
+    /// Variable name to bind the node to (optional)
+    pub variable: Option<String>,
+    /// Node label/type constraint (optional)
+    pub label: Option<String>,
+    /// Property constraints on the node
+    pub properties: Option<Expression>,
+}
+
+/// Relationship pattern in graph traversal
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelationshipPattern {
+    /// Variable name to bind the relationship to (optional)
+    pub variable: Option<String>,
+    /// Relationship type constraint (optional)
+    pub rel_type: Option<String>,
+    /// Direction of relationship
+    pub direction: RelationshipDirection,
+    /// Variable length specification (optional)
+    pub variable_length: Option<VariableLength>,
+    /// Optional relationship flag
+    pub optional: bool,
+    /// Property constraints on the relationship
+    pub properties: Option<Expression>,
+}
+
+/// Direction of relationship in pattern
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RelationshipDirection {
+    /// Outgoing relationship (->)
+    Outgoing,
+    /// Incoming relationship (<-)
+    Incoming,
+    /// Undirected relationship (--)
+    Undirected,
+}
+
+/// Variable length specification for relationships
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VariableLength {
+    /// Minimum number of hops (optional, defaults to 1)
+    pub min_hops: Option<u32>,
+    /// Maximum number of hops (optional, unlimited if None)
+    pub max_hops: Option<u32>,
 }

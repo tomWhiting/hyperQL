@@ -87,6 +87,10 @@ pub enum ExecutionPlan {
         table: String,
         filter: Option<CompiledExpression>,
     },
+    /// TRAVERSE operation for graph pattern matching
+    Traverse {
+        patterns: Vec<CompiledTraversePattern>,
+    },
 }
 
 /// Compiled expression
@@ -141,6 +145,33 @@ pub struct CompiledSortKey {
 pub struct CompiledAssignment {
     pub column: String,
     pub value: CompiledExpression,
+}
+
+/// Compiled traverse pattern for graph operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledTraversePattern {
+    pub start_node: CompiledNodePattern,
+    pub relationship: CompiledRelationshipPattern,
+    pub end_node: CompiledNodePattern,
+}
+
+/// Compiled node pattern
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledNodePattern {
+    pub variable: Option<String>,
+    pub label: Option<String>,
+    pub properties: Option<CompiledExpression>,
+}
+
+/// Compiled relationship pattern
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledRelationshipPattern {
+    pub variable: Option<String>,
+    pub rel_type: Option<String>,
+    pub direction: crate::ast::RelationshipDirection,
+    pub variable_length: Option<crate::ast::VariableLength>,
+    pub optional: bool,
+    pub properties: Option<CompiledExpression>,
 }
 
 /// Value types in the type system
@@ -225,6 +256,22 @@ impl Compiler {
     fn compile_select(&self, select: SelectStatement) -> Result<CompiledQuery> {
         // Start with base table scan
         let mut plan = self.create_base_scan(&select)?;
+
+        // Apply TRAVERSE clause if present
+        if let Some(traverse_clause) = select.traverse_clause {
+            let compiled_patterns = self.compile_traverse_patterns(&traverse_clause.patterns)?;
+            let traverse_plan = ExecutionPlan::Traverse {
+                patterns: compiled_patterns,
+            };
+            // If we have a base scan, chain the traverse after it
+            if let ExecutionPlan::Scan { .. } = plan {
+                // For now, replace the scan with traverse
+                // TODO: Properly chain scan -> traverse in execution flow
+                plan = traverse_plan;
+            } else {
+                plan = traverse_plan;
+            }
+        }
 
         // Apply WHERE clause if present
         if let Some(where_expr) = select.where_clause {
@@ -381,6 +428,54 @@ impl Compiler {
             Expression::Literal(literal) => format!("{:?}", literal),
             _ => "expr".to_string(),
         }
+    }
+
+    /// Compile traverse patterns
+    fn compile_traverse_patterns(&self, patterns: &[crate::ast::TraversePattern]) -> Result<Vec<CompiledTraversePattern>> {
+        let mut compiled_patterns = Vec::new();
+
+        for pattern in patterns {
+            let compiled_start_node = CompiledNodePattern {
+                variable: pattern.start_node.variable.clone(),
+                label: pattern.start_node.label.clone(),
+                properties: if let Some(props) = &pattern.start_node.properties {
+                    Some(self.type_checker.compile_expression(props.clone())?)
+                } else {
+                    None
+                },
+            };
+
+            let compiled_end_node = CompiledNodePattern {
+                variable: pattern.end_node.variable.clone(),
+                label: pattern.end_node.label.clone(),
+                properties: if let Some(props) = &pattern.end_node.properties {
+                    Some(self.type_checker.compile_expression(props.clone())?)
+                } else {
+                    None
+                },
+            };
+
+            let compiled_relationship = CompiledRelationshipPattern {
+                variable: pattern.relationship.variable.clone(),
+                rel_type: pattern.relationship.rel_type.clone(),
+                direction: pattern.relationship.direction.clone(),
+                variable_length: pattern.relationship.variable_length.clone(),
+                optional: pattern.relationship.optional,
+                properties: if let Some(props) = &pattern.relationship.properties {
+                    Some(self.type_checker.compile_expression(props.clone())?)
+                } else {
+                    None
+                },
+            };
+
+            compiled_patterns.push(CompiledTraversePattern {
+                start_node: compiled_start_node,
+                relationship: compiled_relationship,
+                end_node: compiled_end_node,
+            });
+        }
+
+        Ok(compiled_patterns)
     }
 
     /// Generate query metadata
@@ -589,6 +684,30 @@ impl Compiler {
                 }
                 if let Some(filter_expr) = filter {
                     self.collect_expression_metadata(filter_expr, metadata);
+                }
+            }
+            ExecutionPlan::Traverse { patterns } => {
+                // Mark that this query uses graph traversal
+                for pattern in patterns {
+                    if let Some(label) = &pattern.start_node.label {
+                        if !metadata.tables_accessed.contains(label) {
+                            metadata.tables_accessed.push(label.clone());
+                        }
+                    }
+                    if let Some(label) = &pattern.end_node.label {
+                        if !metadata.tables_accessed.contains(label) {
+                            metadata.tables_accessed.push(label.clone());
+                        }
+                    }
+                    if let Some(props) = &pattern.start_node.properties {
+                        self.collect_expression_metadata(props, metadata);
+                    }
+                    if let Some(props) = &pattern.end_node.properties {
+                        self.collect_expression_metadata(props, metadata);
+                    }
+                    if let Some(props) = &pattern.relationship.properties {
+                        self.collect_expression_metadata(props, metadata);
+                    }
                 }
             }
         }
@@ -858,6 +977,18 @@ impl CostEstimator {
                     estimated_io_ops: 30,
                 }
             }
+            ExecutionPlan::Traverse { patterns } => {
+                // Graph traversal costs depend on pattern complexity
+                let pattern_count = patterns.len() as f64;
+                let estimated_traversal_cost = pattern_count * 10.0; // Base cost per pattern
+
+                ExecutionCost {
+                    estimated_rows: 1000, // Estimate typical traversal result size
+                    estimated_cpu_cost: estimated_traversal_cost,
+                    estimated_memory_mb: pattern_count * 20.0, // Memory for graph traversal
+                    estimated_io_ops: (pattern_count * 100.0) as u64, // Graph I/O operations
+                }
+            }
         }
     }
 }
@@ -1057,6 +1188,106 @@ mod tests {
                 }
             }
             _ => panic!("Expected HAVING plan"),
+        }
+    }
+
+    #[test]
+    fn test_compile_traverse_statement() {
+        let compiler = Compiler::new();
+        let query = "SELECT * FROM users TRAVERSE (a:User)-[r:follows]->(b:User)";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Check for traverse plan (as input to project)
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::Traverse { patterns } => {
+                        assert_eq!(patterns.len(), 1);
+                        let pattern = &patterns[0];
+                        assert_eq!(pattern.start_node.variable, Some("a".to_string()));
+                        assert_eq!(pattern.start_node.label, Some("User".to_string()));
+                        assert_eq!(pattern.end_node.variable, Some("b".to_string()));
+                        assert_eq!(pattern.end_node.label, Some("User".to_string()));
+                        assert_eq!(pattern.relationship.variable, Some("r".to_string()));
+                        assert_eq!(pattern.relationship.rel_type, Some("follows".to_string()));
+                    }
+                    other => panic!("Expected TRAVERSE as input to project, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected PROJECT plan with TRAVERSE input, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_compile_variable_length_traverse() {
+        let compiler = Compiler::new();
+        let query = "SELECT * FROM users TRAVERSE (a)-[follows*1..3]->(b)";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::Traverse { patterns } => {
+                        let pattern = &patterns[0];
+                        let var_len = pattern.relationship.variable_length.as_ref().unwrap();
+                        assert_eq!(var_len.min_hops, Some(1));
+                        assert_eq!(var_len.max_hops, Some(3));
+                    }
+                    _ => panic!("Expected TRAVERSE as input"),
+                }
+            }
+            _ => panic!("Expected PROJECT plan with TRAVERSE input"),
+        }
+    }
+
+    #[test]
+    fn test_compile_optional_relationship() {
+        let compiler = Compiler::new();
+        let query = "SELECT * FROM users TRAVERSE (a)-[follows?]->(b)";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::Traverse { patterns } => {
+                        let pattern = &patterns[0];
+                        assert!(pattern.relationship.optional);
+                    }
+                    _ => panic!("Expected TRAVERSE as input"),
+                }
+            }
+            _ => panic!("Expected PROJECT plan with TRAVERSE input"),
+        }
+    }
+
+    #[test]
+    fn test_compile_multiple_traverse_patterns() {
+        let compiler = Compiler::new();
+        let query = "SELECT * FROM users TRAVERSE (a)-[follows]->(b), (b)-[likes]->(c)";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::Traverse { patterns } => {
+                        assert_eq!(patterns.len(), 2);
+                        // Check first pattern
+                        assert_eq!(patterns[0].relationship.rel_type, Some("follows".to_string()));
+                        // Check second pattern
+                        assert_eq!(patterns[1].relationship.rel_type, Some("likes".to_string()));
+                    }
+                    _ => panic!("Expected TRAVERSE as input"),
+                }
+            }
+            _ => panic!("Expected PROJECT plan with TRAVERSE input"),
         }
     }
 }

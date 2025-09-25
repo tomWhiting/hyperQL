@@ -60,6 +60,13 @@ fn parse_select_statement(input: &str) -> Result<Statement> {
         None
     };
 
+    // Parse TRAVERSE clause
+    let traverse_clause = if let Some(traverse_part) = parts.remove("TRAVERSE") {
+        Some(parse_traverse_clause(&traverse_part)?)
+    } else {
+        None
+    };
+
     // Parse WHERE clause
     let where_clause = if let Some(where_part) = parts.remove("WHERE") {
         Some(parse_simple_expression(&where_part)?)
@@ -98,6 +105,7 @@ fn parse_select_statement(input: &str) -> Result<Statement> {
     Ok(Statement::Select(SelectStatement {
         select_list,
         from,
+        traverse_clause,
         where_clause,
         group_by,
         having,
@@ -113,7 +121,7 @@ fn split_query_parts(upper_input: &str, original_input: &str) -> std::collection
     use std::collections::HashMap;
 
     let mut parts = HashMap::new();
-    let keywords = ["SELECT", "FROM", "WHERE", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET"];
+    let keywords = ["SELECT", "FROM", "TRAVERSE", "WHERE", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET"];
 
     // Find keyword positions
     let mut keyword_positions = Vec::new();
@@ -730,6 +738,338 @@ fn is_aggregate_function(name: &str) -> bool {
     matches!(name.to_uppercase().as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX")
 }
 
+/// Parse TRAVERSE clause with Cypher-style patterns
+fn parse_traverse_clause(input: &str) -> Result<TraverseClause> {
+    let input = input.trim();
+    let mut patterns = Vec::new();
+
+    // Split multiple patterns by comma
+    for pattern_str in input.split(',') {
+        let pattern_str = pattern_str.trim();
+        if !pattern_str.is_empty() {
+            patterns.push(parse_traverse_pattern(pattern_str)?);
+        }
+    }
+
+    if patterns.is_empty() {
+        return Err(HyperQLError::ParseError {
+            message: "TRAVERSE clause must contain at least one pattern".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        });
+    }
+
+    Ok(TraverseClause { patterns })
+}
+
+/// Parse a single traverse pattern like (a)-[r:follows*1..3]->(b)
+fn parse_traverse_pattern(input: &str) -> Result<TraversePattern> {
+    let input = input.trim();
+
+    // Find the start node pattern (a)
+    let start_paren = input.find('(')
+        .ok_or_else(|| HyperQLError::ParseError {
+            message: "Pattern must start with node specification in parentheses".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        })?;
+
+    let end_paren = input.find(')')
+        .ok_or_else(|| HyperQLError::ParseError {
+            message: "Missing closing parenthesis for start node".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        })?;
+
+    let start_node = parse_node_pattern(&input[start_paren + 1..end_paren])?;
+
+    // Find the relationship pattern -[...]-> or --> or --
+    let after_start_node = &input[end_paren + 1..];
+
+    // Parse relationship pattern
+    let (relationship, relationship_end_pos) = parse_relationship_pattern(after_start_node)?;
+
+    // Find the end node pattern (b)
+    let end_node_part = &after_start_node[relationship_end_pos..];
+    let start_paren_end = end_node_part.find('(')
+        .ok_or_else(|| HyperQLError::ParseError {
+            message: "Pattern must end with node specification in parentheses".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        })?;
+
+    let end_paren_end = end_node_part.find(')')
+        .ok_or_else(|| HyperQLError::ParseError {
+            message: "Missing closing parenthesis for end node".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        })?;
+
+    let end_node = parse_node_pattern(&end_node_part[start_paren_end + 1..end_paren_end])?;
+
+    Ok(TraversePattern {
+        start_node,
+        relationship,
+        end_node,
+    })
+}
+
+/// Parse node pattern like 'a' or 'a:User' or 'a:User {name: "Alice"}'
+fn parse_node_pattern(input: &str) -> Result<NodePattern> {
+    let input = input.trim();
+
+    if input.is_empty() {
+        return Ok(NodePattern {
+            variable: None,
+            label: None,
+            properties: None,
+        });
+    }
+
+    // Simple parsing for now - just variable name and optional label
+    let parts: Vec<&str> = input.split(':').collect();
+    let variable = if !parts[0].is_empty() {
+        Some(parts[0].trim().to_string())
+    } else {
+        None
+    };
+
+    let label = if parts.len() > 1 && !parts[1].is_empty() {
+        Some(parts[1].trim().to_string())
+    } else {
+        None
+    };
+
+    Ok(NodePattern {
+        variable,
+        label,
+        properties: None, // TODO: Parse property constraints
+    })
+}
+
+/// Parse relationship pattern like -[r:follows*1..3]-> or --> or --
+fn parse_relationship_pattern(input: &str) -> Result<(RelationshipPattern, usize)> {
+    let input = input.trim();
+
+    // Check for different arrow patterns
+    if let Some(pos) = input.find("-->") {
+        // Simple outgoing arrow
+        Ok((RelationshipPattern {
+            variable: None,
+            rel_type: None,
+            direction: RelationshipDirection::Outgoing,
+            variable_length: None,
+            optional: false,
+            properties: None,
+        }, pos + 3))
+    } else if let Some(pos) = input.find("<--") {
+        // Simple incoming arrow
+        Ok((RelationshipPattern {
+            variable: None,
+            rel_type: None,
+            direction: RelationshipDirection::Incoming,
+            variable_length: None,
+            optional: false,
+            properties: None,
+        }, pos + 3))
+    } else if let Some(pos) = input.find("--") {
+        // Simple undirected
+        Ok((RelationshipPattern {
+            variable: None,
+            rel_type: None,
+            direction: RelationshipDirection::Undirected,
+            variable_length: None,
+            optional: false,
+            properties: None,
+        }, pos + 2))
+    } else if input.starts_with('-') {
+        // Complex relationship pattern -[...]-> or -[...]<- or -[...]-
+        parse_complex_relationship_pattern(input)
+    } else {
+        Err(HyperQLError::ParseError {
+            message: "Invalid relationship pattern. Expected arrow syntax like --> or -[type]->".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        })
+    }
+}
+
+/// Parse complex relationship patterns like -[r:follows*1..3]->
+fn parse_complex_relationship_pattern(input: &str) -> Result<(RelationshipPattern, usize)> {
+    let input = input.trim();
+
+    if !input.starts_with('-') {
+        return Err(HyperQLError::ParseError {
+            message: "Relationship pattern must start with dash".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        });
+    }
+
+    // Find the bracket part
+    if let Some(bracket_start) = input.find('[') {
+        if let Some(bracket_end) = input.find(']') {
+            // Parse the content inside brackets
+            let bracket_content = &input[bracket_start + 1..bracket_end];
+            let (variable, rel_type, variable_length, optional) = parse_relationship_spec(bracket_content)?;
+
+            // Determine direction from the arrow after the bracket
+            let after_bracket = &input[bracket_end + 1..];
+            let direction = if after_bracket.starts_with("->") {
+                RelationshipDirection::Outgoing
+            } else if after_bracket.starts_with("<-") {
+                RelationshipDirection::Incoming
+            } else if after_bracket.starts_with('-') {
+                RelationshipDirection::Undirected
+            } else {
+                return Err(HyperQLError::ParseError {
+                    message: "Invalid arrow direction after relationship specification".to_string(),
+                    line: 1,
+                    column: 1,
+                    source_text: Some(input.to_string()),
+                });
+            };
+
+            let arrow_len = match direction {
+                RelationshipDirection::Outgoing | RelationshipDirection::Incoming => 2,
+                RelationshipDirection::Undirected => 1,
+            };
+
+            Ok((RelationshipPattern {
+                variable,
+                rel_type,
+                direction,
+                variable_length,
+                optional,
+                properties: None,
+            }, bracket_end + 1 + arrow_len))
+        } else {
+            Err(HyperQLError::ParseError {
+                message: "Missing closing bracket in relationship pattern".to_string(),
+                line: 1,
+                column: 1,
+                source_text: Some(input.to_string()),
+            })
+        }
+    } else {
+        Err(HyperQLError::ParseError {
+            message: "Expected bracket in relationship pattern".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        })
+    }
+}
+
+/// Parse relationship specification inside brackets like "r:follows*1..3" or "follows?" or ""
+fn parse_relationship_spec(input: &str) -> Result<(Option<String>, Option<String>, Option<VariableLength>, bool)> {
+    let input = input.trim();
+
+    if input.is_empty() {
+        return Ok((None, None, None, false));
+    }
+
+    let mut variable = None;
+    let mut rel_type = None;
+    let mut variable_length = None;
+    let mut optional = false;
+
+    // Check for optional relationship (ends with ?)
+    let input = if input.ends_with('?') {
+        optional = true;
+        &input[..input.len() - 1]
+    } else {
+        input
+    };
+
+    // Check for variable length specification (*1..3 or * or *2)
+    let input = if let Some(star_pos) = input.find('*') {
+        let var_len_str = &input[star_pos + 1..];
+        let var_len = parse_variable_length(var_len_str)?;
+        variable_length = Some(var_len);
+        &input[..star_pos]
+    } else {
+        input
+    };
+
+    // Parse variable and relationship type
+    if input.contains(':') {
+        let parts: Vec<&str> = input.split(':').collect();
+        if !parts[0].is_empty() {
+            variable = Some(parts[0].trim().to_string());
+        }
+        if parts.len() > 1 && !parts[1].is_empty() {
+            rel_type = Some(parts[1].trim().to_string());
+        }
+    } else if !input.is_empty() {
+        // Just a relationship type, no variable
+        rel_type = Some(input.trim().to_string());
+    }
+
+    Ok((variable, rel_type, variable_length, optional))
+}
+
+/// Parse variable length specification like "1..3" or "2" or ""
+fn parse_variable_length(input: &str) -> Result<VariableLength> {
+    let input = input.trim();
+
+    if input.is_empty() {
+        // Just * means any number of hops
+        return Ok(VariableLength {
+            min_hops: None,
+            max_hops: None,
+        });
+    }
+
+    if input.contains("..") {
+        // Range specification like "1..3"
+        let parts: Vec<&str> = input.split("..").collect();
+        let min_hops = if parts[0].is_empty() {
+            None
+        } else {
+            Some(parts[0].parse::<u32>().map_err(|_| HyperQLError::ParseError {
+                message: "Invalid minimum hop count in variable length specification".to_string(),
+                line: 1,
+                column: 1,
+                source_text: Some(input.to_string()),
+            })?)
+        };
+
+        let max_hops = if parts.len() > 1 && !parts[1].is_empty() {
+            Some(parts[1].parse::<u32>().map_err(|_| HyperQLError::ParseError {
+                message: "Invalid maximum hop count in variable length specification".to_string(),
+                line: 1,
+                column: 1,
+                source_text: Some(input.to_string()),
+            })?)
+        } else {
+            None
+        };
+
+        Ok(VariableLength { min_hops, max_hops })
+    } else {
+        // Single number means exactly that many hops
+        let hops = input.parse::<u32>().map_err(|_| HyperQLError::ParseError {
+            message: "Invalid hop count in variable length specification".to_string(),
+            line: 1,
+            column: 1,
+            source_text: Some(input.to_string()),
+        })?;
+
+        Ok(VariableLength {
+            min_hops: Some(hops),
+            max_hops: Some(hops),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -960,6 +1300,89 @@ mod tests {
                         }
                     }
                 }
+            },
+            _ => panic!("Expected SELECT statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_simple_traverse() {
+        let query = "SELECT name FROM users TRAVERSE (a)-->(b)";
+        let result = parse_statement(query).unwrap();
+
+        match result {
+            Statement::Select(stmt) => {
+                assert!(stmt.traverse_clause.is_some());
+                let traverse = stmt.traverse_clause.unwrap();
+                assert_eq!(traverse.patterns.len(), 1);
+
+                let pattern = &traverse.patterns[0];
+                assert_eq!(pattern.start_node.variable, Some("a".to_string()));
+                assert_eq!(pattern.end_node.variable, Some("b".to_string()));
+                assert_eq!(pattern.relationship.direction, RelationshipDirection::Outgoing);
+            },
+            _ => panic!("Expected SELECT statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_complex_traverse_pattern() {
+        let query = "SELECT * FROM users TRAVERSE (a:User)-[r:follows*1..3]->(b:User)";
+        let result = parse_statement(query).unwrap();
+
+        match result {
+            Statement::Select(stmt) => {
+                assert!(stmt.traverse_clause.is_some());
+                let traverse = stmt.traverse_clause.unwrap();
+                assert_eq!(traverse.patterns.len(), 1);
+
+                let pattern = &traverse.patterns[0];
+                assert_eq!(pattern.start_node.variable, Some("a".to_string()));
+                assert_eq!(pattern.start_node.label, Some("User".to_string()));
+                assert_eq!(pattern.end_node.variable, Some("b".to_string()));
+                assert_eq!(pattern.end_node.label, Some("User".to_string()));
+
+                assert_eq!(pattern.relationship.variable, Some("r".to_string()));
+                assert_eq!(pattern.relationship.rel_type, Some("follows".to_string()));
+                assert_eq!(pattern.relationship.direction, RelationshipDirection::Outgoing);
+
+                let var_len = pattern.relationship.variable_length.as_ref().unwrap();
+                assert_eq!(var_len.min_hops, Some(1));
+                assert_eq!(var_len.max_hops, Some(3));
+            },
+            _ => panic!("Expected SELECT statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_undirected_traverse() {
+        let query = "SELECT * FROM users TRAVERSE (a)-[knows]-(b)";
+        let result = parse_statement(query).unwrap();
+
+        match result {
+            Statement::Select(stmt) => {
+                assert!(stmt.traverse_clause.is_some());
+                let traverse = stmt.traverse_clause.unwrap();
+                let pattern = &traverse.patterns[0];
+                assert_eq!(pattern.relationship.direction, RelationshipDirection::Undirected);
+                assert_eq!(pattern.relationship.rel_type, Some("knows".to_string()));
+            },
+            _ => panic!("Expected SELECT statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_optional_relationship() {
+        let query = "SELECT * FROM users TRAVERSE (a)-[follows?]->(b)";
+        let result = parse_statement(query).unwrap();
+
+        match result {
+            Statement::Select(stmt) => {
+                assert!(stmt.traverse_clause.is_some());
+                let traverse = stmt.traverse_clause.unwrap();
+                let pattern = &traverse.patterns[0];
+                assert!(pattern.relationship.optional);
+                assert_eq!(pattern.relationship.rel_type, Some("follows".to_string()));
             },
             _ => panic!("Expected SELECT statement"),
         }
