@@ -86,7 +86,7 @@ pub fn stream_create(name: String, config: HashMap<String, Value>) -> crate::Res
     let function = CreateStreamFunction;
     let args = vec![
         Value::String(name),
-        Value::Object(config),
+        Value::Map(config),
     ];
     function.execute(args)
 }
@@ -96,7 +96,7 @@ pub fn stream_produce(stream: String, event_data: HashMap<String, Value>) -> cra
     let function = ProduceEventFunction;
     let args = vec![
         Value::String(stream),
-        Value::Object(event_data),
+        Value::Map(event_data),
     ];
     function.execute(args)
 }
@@ -106,7 +106,7 @@ pub fn stream_consume(stream: String, config: HashMap<String, Value>) -> crate::
     let function = ConsumeStreamFunction;
     let args = vec![
         Value::String(stream),
-        Value::Object(config),
+        Value::Map(config),
     ];
     function.execute(args)
 }

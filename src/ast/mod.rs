@@ -116,6 +116,7 @@
 //! queries while maintaining clean separation between parsing, analysis, and
 //! execution phases.
 
+pub mod geometric;
 pub mod graph;
 pub mod vector;
 pub mod timeseries;
@@ -227,6 +228,10 @@ pub enum Expression {
         name: String,
         args: Vec<Expression>,
     },
+    /// Geometric operations in hyperbolic space
+    Geometric(geometric::GeometricExpression),
+    /// Vector operations with named embeddings
+    Vector(VectorExpression),
 }
 
 /// Literal value types
@@ -284,6 +289,27 @@ pub enum UnaryOperator {
     Not,
     Minus,
     Plus,
+}
+
+/// Vector expression types for named embeddings
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum VectorExpression {
+    /// Similarity search with named vector
+    Similarity {
+        vector_name: String,
+        reference: Box<Expression>,
+        metric: vector::similarity::SimilarityMetric,
+        threshold: Option<f64>,
+        vector_type: vector::similarity::VectorType,
+    },
+    /// k-nearest neighbors with named vector
+    KNN {
+        vector_name: String,
+        reference: Box<Expression>,
+        k: u32,
+        metric: vector::similarity::SimilarityMetric,
+        vector_type: vector::similarity::VectorType,
+    },
 }
 
 /// INSERT statement structure

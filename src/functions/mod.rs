@@ -212,6 +212,8 @@
 //! sophisticated multi-paradigm queries with high performance and
 //! mathematical precision across all supported data types and operations.
 
+pub mod geometric;
 pub mod graph;
 pub mod vector;
 pub mod timeseries;
+pub mod streams;

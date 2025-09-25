@@ -108,7 +108,7 @@ pub fn window_tumbling(stream: String, duration: i64, aggregate_fn: String) -> c
     let function = TumblingWindowFunction;
     let args = vec![
         Value::String(stream),
-        Value::Integer(duration),
+        Value::Int(duration),
         Value::String(aggregate_fn),
     ];
     function.execute(args)
@@ -124,8 +124,8 @@ pub fn window_sliding(
     let function = SlidingWindowFunction;
     let args = vec![
         Value::String(stream),
-        Value::Integer(duration),
-        Value::Integer(slide),
+        Value::Int(duration),
+        Value::Int(slide),
         Value::String(aggregate_fn),
     ];
     function.execute(args)
@@ -141,7 +141,7 @@ pub fn window_hyperbolic(
     let function = HyperbolicWindowFunction;
     let args = vec![
         Value::String(stream),
-        Value::Array(center.into_iter().map(Value::Float).collect()),
+        Value::List(center.into_iter().map(Value::Float).collect()),
         Value::Float(radius),
         Value::String(aggregate_fn),
     ];

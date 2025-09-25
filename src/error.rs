@@ -85,6 +85,13 @@ pub enum HyperQLError {
         context: Vec<String>,
     },
 
+    /// Validation errors for parameters and constraints
+    #[error("Validation error: {message}{}", field.as_ref().map(|f| format!(" in field '{}'", f)).unwrap_or_default())]
+    ValidationError {
+        message: String,
+        field: Option<String>,
+    },
+
     /// Type system violations
     #[error("Type error: expected {expected}, found {found} in {context}")]
     TypeError {

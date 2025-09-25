@@ -801,6 +801,22 @@ impl TypeChecker {
                     result_type,
                 })
             }
+            Expression::Geometric(geom_expr) => {
+                // TODO: Implement geometric expression compilation
+                Err(HyperQLError::ExecutionError {
+                    message: format!("Geometric expression compilation not yet implemented: {:?}", geom_expr),
+                    operation: "compile_geometric_expression".to_string(),
+                    entity_context: Some("geometric_compilation".to_string()),
+                })
+            }
+            Expression::Vector(vector_expr) => {
+                // TODO: Implement vector expression compilation
+                Err(HyperQLError::ExecutionError {
+                    message: format!("Vector expression compilation not yet implemented: {:?}", vector_expr),
+                    operation: "compile_vector_expression".to_string(),
+                    entity_context: Some("vector_compilation".to_string()),
+                })
+            }
         }
     }
 
