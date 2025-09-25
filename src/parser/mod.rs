@@ -21,12 +21,12 @@ pub fn parse_statement(input: &str) -> Result<Statement> {
     } else if upper_input.starts_with("DELETE") {
         parse_delete_statement(input)
     } else {
-        Err(HyperQLError::ParseError {
-            message: "Unsupported statement type. Supported: SELECT, INSERT, UPDATE, DELETE".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })
+        Err(HyperQLError::simple_parse_error(
+            "Unsupported statement type. Supported: SELECT, INSERT, UPDATE, DELETE",
+            input,
+            1,
+            1,
+        ))
     }
 }
 
@@ -42,12 +42,12 @@ fn parse_select_statement(input: &str) -> Result<Statement> {
     let select_list = if let Some(select_part) = parts.remove("SELECT") {
         parse_select_list(&select_part)?
     } else {
-        return Err(HyperQLError::ParseError {
-            message: "Missing SELECT clause".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        });
+        return Err(HyperQLError::simple_parse_error(
+            "Missing SELECT clause",
+            input,
+            1,
+            1,
+        ));
     };
 
     // Parse FROM clause
@@ -369,40 +369,40 @@ fn parse_insert_statement(input: &str) -> Result<Statement> {
 
     // Find INTO keyword position
     let into_pos = upper_input.find(" INTO ")
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "INSERT statement must contain INTO clause".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "INSERT statement must contain INTO clause",
+            input,
+            1,
+            1,
+        ))?;
 
     // Extract table name after INTO
     let after_into = &input[into_pos + 6..].trim();
     let parts: Vec<&str> = after_into.split_whitespace().collect();
     let table = parts.first()
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Missing table name after INTO".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?.to_string();
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Missing table name after INTO",
+            input,
+            1,
+            1,
+        ))?.to_string();
 
     // Find columns specification (table_name (col1, col2, ...))
     let columns_start = after_into.find('(')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "INSERT statement must specify columns in parentheses".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "INSERT statement must specify columns in parentheses",
+            input,
+            1,
+            1,
+        ))?;
 
     let columns_end = after_into.find(')')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Missing closing parenthesis for column list".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Missing closing parenthesis for column list",
+            input,
+            1,
+            1,
+        ))?;
 
     let column_list = &after_into[columns_start + 1..columns_end];
     let columns: Vec<String> = column_list
@@ -412,12 +412,12 @@ fn parse_insert_statement(input: &str) -> Result<Statement> {
 
     // Find VALUES keyword
     let values_pos = upper_input.find(" VALUES ")
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "INSERT statement must contain VALUES clause".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "INSERT statement must contain VALUES clause",
+            input,
+            1,
+            1,
+        ))?;
 
     // Parse VALUES clause
     let values_part = &input[values_pos + 8..].trim();
@@ -436,22 +436,22 @@ fn parse_values_list(input: &str) -> Result<Vec<Vec<Expression>>> {
     let input = input.trim();
 
     if !input.starts_with('(') {
-        return Err(HyperQLError::ParseError {
-            message: "VALUES must start with opening parenthesis".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        });
+        return Err(HyperQLError::simple_parse_error(
+            "VALUES must start with opening parenthesis",
+            input,
+            1,
+            1,
+        ));
     }
 
     // Simple parsing for now - assumes single VALUES row
     let end_paren = input.find(')')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Missing closing parenthesis in VALUES clause".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Missing closing parenthesis in VALUES clause",
+            input,
+            1,
+            1,
+        ))?;
 
     let values_content = &input[1..end_paren];
     let value_strings: Vec<&str> = values_content.split(',').collect();
@@ -473,23 +473,23 @@ fn parse_update_statement(input: &str) -> Result<Statement> {
     // Extract table name after UPDATE
     let parts: Vec<&str> = input.split_whitespace().collect();
     if parts.len() < 2 {
-        return Err(HyperQLError::ParseError {
-            message: "UPDATE statement must specify table name".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        });
+        return Err(HyperQLError::simple_parse_error(
+            "UPDATE statement must specify table name",
+            input,
+            1,
+            1,
+        ));
     }
     let table = parts[1].to_string();
 
     // Find SET clause
     let set_pos = upper_input.find(" SET ")
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "UPDATE statement must contain SET clause".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "UPDATE statement must contain SET clause",
+            input,
+            1,
+            1,
+        ))?;
 
     // Find WHERE clause (optional)
     let where_pos = upper_input.find(" WHERE ");
@@ -522,12 +522,12 @@ fn parse_assignments(input: &str) -> Result<Vec<Assignment>> {
         let parts: Vec<&str> = assignment_str.splitn(2, '=').collect();
 
         if parts.len() != 2 {
-            return Err(HyperQLError::ParseError {
-                message: "Invalid assignment syntax. Expected: column = value".to_string(),
-                line: 1,
-                column: 1,
-                source_text: Some(assignment_str.to_string()),
-            });
+            return Err(HyperQLError::simple_parse_error(
+                "Invalid assignment syntax. Expected: column = value",
+                input,
+                1,
+                1,
+            ));
         }
 
         let column = parts[0].trim().to_string();
@@ -546,12 +546,12 @@ fn parse_delete_statement(input: &str) -> Result<Statement> {
 
     // Find FROM clause
     let from_pos = upper_input.find(" FROM ")
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "DELETE statement must contain FROM clause".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "DELETE statement must contain FROM clause",
+            input,
+            1,
+            1,
+        ))?;
 
     // Find WHERE clause (optional)
     let where_pos = upper_input.find(" WHERE ");
@@ -565,12 +565,12 @@ fn parse_delete_statement(input: &str) -> Result<Statement> {
     };
 
     let table = table_part.trim().split_whitespace().next()
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Missing table name in DELETE FROM clause".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?.to_string();
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Missing table name in DELETE FROM clause",
+            input,
+            1,
+            1,
+        ))?.to_string();
 
     Ok(Statement::Delete(DeleteStatement {
         table,
@@ -618,22 +618,22 @@ fn parse_expression_or_function(input: &str) -> Result<Expression> {
 fn parse_function_call(input: &str) -> Result<Expression> {
     let input = input.trim();
     let paren_pos = input.find('(')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Invalid function call syntax".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Invalid function call syntax",
+            input,
+            1,
+            1,
+        ))?;
 
     let func_name = input[..paren_pos].trim().to_string();
 
     let end_paren = input.rfind(')')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Missing closing parenthesis in function call".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Missing closing parenthesis in function call",
+            input,
+            1,
+            1,
+        ))?;
 
     let args_str = &input[paren_pos + 1..end_paren];
     let mut args = Vec::new();
@@ -811,12 +811,12 @@ fn parse_traverse_clause(input: &str) -> Result<TraverseClause> {
     }
 
     if patterns.is_empty() {
-        return Err(HyperQLError::ParseError {
-            message: "TRAVERSE clause must contain at least one pattern".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        });
+        return Err(HyperQLError::simple_parse_error(
+            "TRAVERSE clause must contain at least one pattern",
+            input,
+            1,
+            1,
+        ));
     }
 
     Ok(TraverseClause { patterns })
@@ -828,20 +828,20 @@ fn parse_traverse_pattern(input: &str) -> Result<TraversePattern> {
 
     // Find the start node pattern (a)
     let start_paren = input.find('(')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Pattern must start with node specification in parentheses".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Pattern must start with node specification in parentheses",
+            input,
+            1,
+            1,
+        ))?;
 
     let end_paren = input.find(')')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Missing closing parenthesis for start node".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Missing closing parenthesis for start node",
+            input,
+            1,
+            1,
+        ))?;
 
     let start_node = parse_node_pattern(&input[start_paren + 1..end_paren])?;
 
@@ -854,20 +854,20 @@ fn parse_traverse_pattern(input: &str) -> Result<TraversePattern> {
     // Find the end node pattern (b)
     let end_node_part = &after_start_node[relationship_end_pos..];
     let start_paren_end = end_node_part.find('(')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Pattern must end with node specification in parentheses".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Pattern must end with node specification in parentheses",
+            input,
+            1,
+            1,
+        ))?;
 
     let end_paren_end = end_node_part.find(')')
-        .ok_or_else(|| HyperQLError::ParseError {
-            message: "Missing closing parenthesis for end node".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        .ok_or_else(|| HyperQLError::simple_parse_error(
+            "Missing closing parenthesis for end node",
+            input,
+            1,
+            1,
+        ))?;
 
     let end_node = parse_node_pattern(&end_node_part[start_paren_end + 1..end_paren_end])?;
 
@@ -950,12 +950,12 @@ fn parse_relationship_pattern(input: &str) -> Result<(RelationshipPattern, usize
         // Complex relationship pattern -[...]-> or -[...]<- or -[...]-
         parse_complex_relationship_pattern(input)
     } else {
-        Err(HyperQLError::ParseError {
-            message: "Invalid relationship pattern. Expected arrow syntax like --> or -[type]->".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })
+        Err(HyperQLError::simple_parse_error(
+            "Invalid relationship pattern. Expected arrow syntax like --> or -[type]->",
+            input,
+            1,
+            1,
+        ))
     }
 }
 
@@ -964,12 +964,12 @@ fn parse_complex_relationship_pattern(input: &str) -> Result<(RelationshipPatter
     let input = input.trim();
 
     if !input.starts_with('-') {
-        return Err(HyperQLError::ParseError {
-            message: "Relationship pattern must start with dash".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        });
+        return Err(HyperQLError::simple_parse_error(
+            "Relationship pattern must start with dash",
+            input,
+            1,
+            1,
+        ));
     }
 
     // Find the bracket part
@@ -988,12 +988,12 @@ fn parse_complex_relationship_pattern(input: &str) -> Result<(RelationshipPatter
             } else if after_bracket.starts_with('-') {
                 RelationshipDirection::Undirected
             } else {
-                return Err(HyperQLError::ParseError {
-                    message: "Invalid arrow direction after relationship specification".to_string(),
-                    line: 1,
-                    column: 1,
-                    source_text: Some(input.to_string()),
-                });
+                return Err(HyperQLError::simple_parse_error(
+                    "Invalid arrow direction after relationship specification",
+                    input,
+                    1,
+                    1,
+                ));
             };
 
             let arrow_len = match direction {
@@ -1010,20 +1010,20 @@ fn parse_complex_relationship_pattern(input: &str) -> Result<(RelationshipPatter
                 properties: None,
             }, bracket_end + 1 + arrow_len))
         } else {
-            Err(HyperQLError::ParseError {
-                message: "Missing closing bracket in relationship pattern".to_string(),
-                line: 1,
-                column: 1,
-                source_text: Some(input.to_string()),
-            })
+            Err(HyperQLError::simple_parse_error(
+                "Missing closing bracket in relationship pattern",
+                input,
+                1,
+                1,
+            ))
         }
     } else {
-        Err(HyperQLError::ParseError {
-            message: "Expected bracket in relationship pattern".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })
+        Err(HyperQLError::simple_parse_error(
+            "Expected bracket in relationship pattern",
+            input,
+            1,
+            1,
+        ))
     }
 }
 
@@ -1093,21 +1093,21 @@ fn parse_variable_length(input: &str) -> Result<VariableLength> {
         let min_hops = if parts[0].is_empty() {
             None
         } else {
-            Some(parts[0].parse::<u32>().map_err(|_| HyperQLError::ParseError {
-                message: "Invalid minimum hop count in variable length specification".to_string(),
-                line: 1,
-                column: 1,
-                source_text: Some(input.to_string()),
-            })?)
+            Some(parts[0].parse::<u32>().map_err(|_| HyperQLError::simple_parse_error(
+                "Invalid minimum hop count in variable length specification",
+                input,
+                1,
+                1,
+            ))?)
         };
 
         let max_hops = if parts.len() > 1 && !parts[1].is_empty() {
-            Some(parts[1].parse::<u32>().map_err(|_| HyperQLError::ParseError {
-                message: "Invalid maximum hop count in variable length specification".to_string(),
-                line: 1,
-                column: 1,
-                source_text: Some(input.to_string()),
-            })?)
+            Some(parts[1].parse::<u32>().map_err(|_| HyperQLError::simple_parse_error(
+                "Invalid maximum hop count in variable length specification",
+                input,
+                1,
+                1,
+            ))?)
         } else {
             None
         };
@@ -1115,12 +1115,12 @@ fn parse_variable_length(input: &str) -> Result<VariableLength> {
         Ok(VariableLength { min_hops, max_hops })
     } else {
         // Single number means exactly that many hops
-        let hops = input.parse::<u32>().map_err(|_| HyperQLError::ParseError {
-            message: "Invalid hop count in variable length specification".to_string(),
-            line: 1,
-            column: 1,
-            source_text: Some(input.to_string()),
-        })?;
+        let hops = input.parse::<u32>().map_err(|_| HyperQLError::simple_parse_error(
+            "Invalid hop count in variable length specification",
+            input,
+            1,
+            1,
+        ))?;
 
         Ok(VariableLength {
             min_hops: Some(hops),
