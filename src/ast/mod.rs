@@ -1,0 +1,315 @@
+//! # Abstract Syntax Tree for HyperQL
+//!
+//! This module defines the complete abstract syntax tree (AST) representation for
+//! HyperQL queries. The AST captures the full semantic structure of queries after
+//! parsing, providing a clean interface between parsing and compilation phases.
+//!
+//! ## Purpose
+//!
+//! The AST serves as the central intermediate representation for HyperQL queries:
+//! - Provides a structured representation of all query constructs
+//! - Enables semantic analysis and type checking
+//! - Supports query transformation and optimization
+//! - Facilitates code generation for different execution engines
+//! - Enables query introspection and analysis tools
+//!
+//! ## Design Principles
+//!
+//! The AST design follows several key principles:
+//!
+//! ### Completeness
+//! Every syntactic construct in HyperQL has a corresponding AST node, ensuring
+//! that no information is lost during parsing and that the full query semantics
+//! are preserved.
+//!
+//! ### Composability
+//! AST nodes are designed to compose naturally, allowing complex queries to be
+//! built from simpler components through a clean hierarchical structure.
+//!
+//! ### Type Safety
+//! The AST uses Rust's type system to prevent malformed query structures and
+//! ensure that only valid query combinations can be represented.
+//!
+//! ### Performance
+//! AST nodes use efficient representations and avoid unnecessary allocations,
+//! with reference counting for shared subexpressions.
+//!
+//! ## Query Structure
+//!
+//! HyperQL queries are represented by a hierarchical AST structure:
+//!
+//! ### Statement Types
+//! HyperQL supports multiple statement types:
+//! - **SELECT**: Data retrieval with projections, filtering, grouping, and ordering
+//! - **INSERT**: Data insertion with column specifications and value lists
+//! - **UPDATE**: Data modification with assignments and optional WHERE clauses
+//! - **DELETE**: Data removal with optional WHERE clauses
+//!
+//! ### SELECT Query Structure
+//! SELECT statements support comprehensive SQL functionality:
+//! - SELECT clause with expressions, aggregate functions, and aliases
+//! - FROM clause with table sources and optional aliases
+//! - WHERE clause with complex filter predicates and boolean logic
+//! - GROUP BY clause for data aggregation by expressions
+//! - HAVING clause for filtering grouped results
+//! - ORDER BY clause for result sorting (ASC/DESC)
+//! - LIMIT and OFFSET clauses for pagination
+//! - DISTINCT flag for duplicate elimination
+//!
+//! ### Expression Trees
+//! All expressions are represented as typed expression trees supporting:
+//! - **Arithmetic Operations**: Addition, subtraction, multiplication, division, modulo
+//! - **Logical Operations**: AND, OR, NOT with proper precedence handling
+//! - **Comparison Operations**: Equality, inequality, relational comparisons
+//! - **Function Calls**: Built-in functions (string, math, date) and aggregate functions
+//! - **Aggregate Functions**: COUNT, SUM, AVG, MIN, MAX with proper grouping semantics
+//! - **Column References**: Table-qualified and unqualified column access
+//! - **Literal Values**: Numbers, strings, booleans, NULL, entity IDs
+//!
+//! ### Type System Integration
+//! The AST includes rich type information that enables:
+//! - Compile-time type checking
+//! - Automatic type coercion where appropriate
+//! - Type-aware optimization decisions
+//! - Runtime type safety guarantees
+//!
+//! ## Module Organization
+//!
+//! The AST module is organized into focused submodules:
+//!
+//! - [`query`]: Core query structure and top-level constructs
+//! - [`expression`]: Expression trees and operators
+//! - [`literal`]: Literal values and constants
+//! - [`identifier`]: Entity and property identifiers
+//! - [`function`]: Function calls and built-in operations
+//! - [`predicate`]: Boolean expressions and filters
+//! - [`traverse`]: Graph traversal and navigation
+//! - [`cascade`]: Measure propagation and cascade operations
+//! - [`aggregate`]: Aggregation functions and grouping
+//! - [`temporal`]: Time-based operations and trajectories
+//!
+//! ## Geometric Extensions
+//!
+//! The AST includes specialized nodes for hyperbolic operations:
+//! - Distance calculations and comparisons
+//! - Spatial region queries and containment tests
+//! - Position-based filtering and sorting
+//! - Trajectory analysis and temporal patterns
+//!
+//! ## Validation and Analysis
+//!
+//! The AST supports comprehensive validation:
+//! - Semantic consistency checking
+//! - Type compatibility verification
+//! - Reference resolution and scope analysis
+//! - Performance impact estimation
+//!
+//! ## Integration
+//!
+//! The AST integrates with other HyperQL components:
+//! - **Parser**: Creates AST nodes from query text
+//! - **Compiler**: Transforms AST into execution plans
+//! - **Optimizer**: Analyzes and transforms AST nodes
+//! - **Type System**: Provides type information for all nodes
+//!
+//! This comprehensive AST enables HyperQL to support complex multi-paradigm
+//! queries while maintaining clean separation between parsing, analysis, and
+//! execution phases.
+
+pub mod graph;
+pub mod vector;
+pub mod timeseries;
+
+// Core query structures
+pub use crate::types::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Root statement types in HyperQL
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Statement {
+    /// SELECT statement for data retrieval
+    Select(SelectStatement),
+    /// INSERT statement for data insertion
+    Insert(InsertStatement),
+    /// UPDATE statement for data modification
+    Update(UpdateStatement),
+    /// DELETE statement for data removal
+    Delete(DeleteStatement),
+}
+
+/// SELECT statement structure
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SelectStatement {
+    /// Columns/expressions to select
+    pub select_list: Vec<SelectItem>,
+    /// FROM clause with table/entity sources
+    pub from: Option<FromClause>,
+    /// WHERE clause for filtering
+    pub where_clause: Option<Expression>,
+    /// GROUP BY expressions
+    pub group_by: Vec<Expression>,
+    /// HAVING clause for grouped filtering
+    pub having: Option<Expression>,
+    /// ORDER BY expressions
+    pub order_by: Vec<OrderByItem>,
+    /// LIMIT for result count restriction
+    pub limit: Option<u64>,
+    /// OFFSET for pagination
+    pub offset: Option<u64>,
+    /// DISTINCT flag
+    pub distinct: bool,
+}
+
+/// Items in the SELECT list
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SelectItem {
+    /// Wildcard (*) to select all columns
+    Wildcard,
+    /// Expression with optional alias
+    Expression {
+        expr: Expression,
+        alias: Option<String>,
+    },
+}
+
+/// FROM clause sources
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FromClause {
+    /// Simple table/entity reference
+    Table {
+        name: String,
+        alias: Option<String>,
+    },
+    /// Subquery as source
+    Subquery {
+        query: Box<SelectStatement>,
+        alias: String,
+    },
+}
+
+/// ORDER BY items
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderByItem {
+    pub expr: Expression,
+    pub direction: OrderDirection,
+}
+
+/// Sort direction
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OrderDirection {
+    Asc,
+    Desc,
+}
+
+/// Expression types in HyperQL
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Expression {
+    /// Literal values
+    Literal(Literal),
+    /// Column references
+    Column(ColumnRef),
+    /// Binary operations
+    Binary {
+        left: Box<Expression>,
+        op: BinaryOperator,
+        right: Box<Expression>,
+    },
+    /// Unary operations
+    Unary {
+        op: UnaryOperator,
+        expr: Box<Expression>,
+    },
+    /// Function calls
+    Function {
+        name: String,
+        args: Vec<Expression>,
+    },
+}
+
+/// Literal value types
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Literal {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    EntityId(EntityId),
+}
+
+/// Column reference
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ColumnRef {
+    pub table: Option<String>,
+    pub name: String,
+}
+
+/// Binary operators
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BinaryOperator {
+    // Arithmetic
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+
+    // Comparison
+    Equal,
+    NotEqual,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+
+    // Logical
+    And,
+    Or,
+
+    // String
+    Like,
+    NotLike,
+
+    // Membership
+    In,
+    NotIn,
+}
+
+/// Unary operators
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum UnaryOperator {
+    Not,
+    Minus,
+    Plus,
+}
+
+/// INSERT statement structure
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InsertStatement {
+    pub table: String,
+    pub columns: Vec<String>,
+    pub values: Vec<Vec<Expression>>,
+}
+
+/// UPDATE statement structure
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateStatement {
+    pub table: String,
+    pub assignments: Vec<Assignment>,
+    pub where_clause: Option<Expression>,
+}
+
+/// Assignment for UPDATE statements
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Assignment {
+    pub column: String,
+    pub value: Expression,
+}
+
+/// DELETE statement structure
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeleteStatement {
+    pub table: String,
+    pub where_clause: Option<Expression>,
+}
