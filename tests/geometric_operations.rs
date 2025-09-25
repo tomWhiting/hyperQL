@@ -130,14 +130,12 @@ fn test_geometric_functions_integration() {
     let pos1 = Position3D { x: 0.1, y: 0.2, z: 0.3 };
     let pos2 = Position3D { x: 0.4, y: 0.5, z: 0.6 };
     
-    // Test hyperbolic distance function returns descriptive error
+    // Test hyperbolic distance function works correctly
     let distance_result = hyperbolic_distance(&pos1, &pos2);
-    assert!(distance_result.is_err());
-    let error_msg = distance_result.unwrap_err().to_string();
-    assert!(error_msg.contains("Hyperbolic distance"));
-    assert!(error_msg.contains("not yet implemented"));
-    assert!(error_msg.contains("pos1=(0.100, 0.200, 0.300)"));
-    assert!(error_msg.contains("pos2=(0.400, 0.500, 0.600)"));
+    assert!(distance_result.is_ok());
+    let distance = distance_result.unwrap();
+    assert!(distance > 0.0);
+    assert!(distance.is_finite());
     
     // Test within radius function
     let within_result = within_radius(&pos1, &pos2, 1.0);
@@ -181,18 +179,19 @@ fn test_geometric_batch_operations() {
     
     // Test k-nearest neighbors
     let knn_result = k_nearest_neighbors(&positions, &reference, 2);
-    assert!(knn_result.is_err());
-    let error_msg = knn_result.unwrap_err().to_string();
-    assert!(error_msg.contains("K-nearest neighbors"));
-    assert!(error_msg.contains("k=2"));
-    assert!(error_msg.contains("3 candidates"));
-    
+    assert!(knn_result.is_ok());
+    let knn_neighbors = knn_result.unwrap();
+    assert_eq!(knn_neighbors.len(), 2);
+    // Should return the 2 nearest neighbors with their distances
+    assert!(knn_neighbors[0].1 <= knn_neighbors[1].1); // Sorted by distance
+
     // Test finding near positions
     let near_result = find_near_positions(&positions, &reference, 0.25);
-    assert!(near_result.is_err());
-    let near_error = near_result.unwrap_err().to_string();
-    assert!(near_error.contains("Find near positions"));
-    assert!(near_error.contains("max_distance=0.250"));
+    assert!(near_result.is_ok());
+    let near_indices = near_result.unwrap();
+    // Should find positions within distance 0.25 from origin
+    assert!(near_indices.len() <= 3); // At most all 3 positions
+    assert!(near_indices.len() >= 1); // At least some positions should be within 0.25
 }
 
 #[test]

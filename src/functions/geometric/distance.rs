@@ -46,18 +46,60 @@ pub fn hyperbolic_distance(pos1: &Position3D, pos2: &Position3D) -> Result<f64, 
         });
     }
 
-    // TODO: Implement actual hyperbolic distance computation
-    // This would involve:
-    // 1. Compute Möbius subtraction: x⊖y = (x-y)/(1-⟨x,y⟩)
-    // 2. Compute norm of result: ||x⊖y||
-    // 3. Apply artanh: d = artanh(||x⊖y||)
-    // 4. Handle numerical stability near boundary
+    // Implement hyperbolic distance computation using Poincaré ball model
+    // Formula: d(x,y) = artanh(||x⊖y||) where x⊖y is Möbius subtraction
+    // Möbius subtraction: x⊖y = (x-y)/(1-⟨x,y⟩)
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Hyperbolic distance not yet implemented. {}", operation_details),
-        operation: "hyperbolic_distance".to_string(),
-        entity_context: Some("geometric_computation".to_string()),
-    })
+    // Compute dot product ⟨x,y⟩
+    let dot_product = pos1.x * pos2.x + pos1.y * pos2.y + pos1.z * pos2.z;
+
+    // Compute x - y
+    let diff_x = pos1.x - pos2.x;
+    let diff_y = pos1.y - pos2.y;
+    let diff_z = pos1.z - pos2.z;
+
+    // Compute denominator: 1 - ⟨x,y⟩
+    let denominator = 1.0 - dot_product;
+
+    // Check for numerical issues (denominator too close to zero)
+    if denominator.abs() < 1e-12 {
+        return Err(HyperQLError::GeometricError {
+            operation: "hyperbolic_distance".to_string(),
+            reason: "Numerical instability: positions too close to boundary".to_string(),
+            positions: vec![format!("denominator={:.15}, dot_product={:.15}", denominator, dot_product)],
+        });
+    }
+
+    // Compute Möbius subtraction: (x-y)/(1-⟨x,y⟩)
+    let mobius_x = diff_x / denominator;
+    let mobius_y = diff_y / denominator;
+    let mobius_z = diff_z / denominator;
+
+    // Compute norm of Möbius subtraction result
+    let mobius_norm_sq = mobius_x * mobius_x + mobius_y * mobius_y + mobius_z * mobius_z;
+    let mobius_norm = mobius_norm_sq.sqrt();
+
+    // Check that the result is within valid range for artanh
+    if mobius_norm >= 1.0 {
+        // Clamp to slightly less than 1 for numerical stability
+        let clamped_norm = 0.99999999_f64;
+        let distance = clamped_norm.atanh();
+        return Ok(distance);
+    }
+
+    // Apply artanh to get hyperbolic distance
+    let distance = mobius_norm.atanh();
+
+    // Ensure distance is non-negative and finite
+    if !distance.is_finite() || distance < 0.0 {
+        return Err(HyperQLError::GeometricError {
+            operation: "hyperbolic_distance".to_string(),
+            reason: "Invalid distance computation result".to_string(),
+            positions: vec![format!("distance={:.15}, mobius_norm={:.15}", distance, mobius_norm)],
+        });
+    }
+
+    Ok(distance)
 }
 
 /// Compute approximate hyperbolic distance for performance
@@ -135,18 +177,39 @@ pub fn batch_hyperbolic_distances(
         reference.x, reference.y, reference.z, positions.len()
     );
 
-    // TODO: Implement batch hyperbolic distance computation
-    // This would involve:
-    // 1. Optimize for vectorized operations where possible
-    // 2. Reuse intermediate calculations (reference point norms, etc.)
-    // 3. Apply SIMD optimizations for bulk operations
-    // 4. Handle edge cases and validation efficiently
+    // Implement batch hyperbolic distance computation
+    // Optimize by precomputing reference point properties
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Batch hyperbolic distances not yet implemented. {}", operation_details),
-        operation: "batch_hyperbolic_distances".to_string(),
-        entity_context: Some(format!("reference_point_and_{}_targets", positions.len())),
-    })
+    if positions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Validate reference position
+    let ref_norm_sq = reference.x * reference.x + reference.y * reference.y + reference.z * reference.z;
+    if ref_norm_sq >= 1.0 {
+        return Err(HyperQLError::GeometricError {
+            operation: "batch_hyperbolic_distances".to_string(),
+            reason: "Reference position is outside Poincaré ball (norm >= 1.0)".to_string(),
+            positions: vec![format!("reference=({:.3}, {:.3}, {:.3}), norm²={:.6}", reference.x, reference.y, reference.z, ref_norm_sq)],
+        });
+    }
+
+    let mut distances = Vec::with_capacity(positions.len());
+
+    for (index, position) in positions.iter().enumerate() {
+        match hyperbolic_distance(reference, position) {
+            Ok(distance) => distances.push(distance),
+            Err(e) => {
+                return Err(HyperQLError::ExecutionError {
+                    message: format!("Failed to compute distance to position[{}]: {}", index, e),
+                    operation: "batch_hyperbolic_distances".to_string(),
+                    entity_context: Some(format!("batch_item_{}", index)),
+                });
+            }
+        }
+    }
+
+    Ok(distances)
 }
 
 #[cfg(test)]
@@ -160,10 +223,11 @@ mod tests {
         let pos2 = Position3D { x: 0.4, y: 0.5, z: 0.6 };
         
         let result = hyperbolic_distance(&pos1, &pos2);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Hyperbolic distance"));
-        assert!(error_msg.contains("not yet implemented"));
+        assert!(result.is_ok());
+        let distance = result.unwrap();
+        // Distance should be positive and finite
+        assert!(distance > 0.0);
+        assert!(distance.is_finite());
 
         // Invalid point outside Poincaré ball
         let pos_invalid = Position3D { x: 1.1, y: 0.0, z: 0.0 };
@@ -221,10 +285,15 @@ mod tests {
         ];
 
         let result = batch_hyperbolic_distances(&reference, &positions);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Batch hyperbolic distances"));
-        assert!(error_msg.contains("to 3 positions"));
+        assert!(result.is_ok());
+        let distances = result.unwrap();
+        // Should return 3 distances
+        assert_eq!(distances.len(), 3);
+        // All distances should be positive and finite
+        for distance in &distances {
+            assert!(distance > &0.0);
+            assert!(distance.is_finite());
+        }
     }
 
     #[test]
@@ -239,8 +308,10 @@ mod tests {
         // Very close to boundary but valid
         let pos_close = Position3D { x: 0.999, y: 0.0, z: 0.0 };
         let result_close = hyperbolic_distance(&pos_close, &pos_valid);
-        assert!(result_close.is_err()); // Still not implemented, but validation should pass
-        let error_msg = result_close.unwrap_err().to_string();
-        assert!(error_msg.contains("not yet implemented")); // Should be implementation error, not validation error
+        assert!(result_close.is_ok()); // Should work for valid positions
+        let distance = result_close.unwrap();
+        // Should be a large finite distance since pos_close is near the boundary
+        assert!(distance > 0.0);
+        assert!(distance.is_finite());
     }
 }

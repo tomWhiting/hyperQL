@@ -33,19 +33,31 @@ pub fn find_near_positions(
         });
     }
 
-    // TODO: Implement finding near positions
-    // This would involve:
-    // 1. Iterate through all positions
-    // 2. Compute hyperbolic distance to reference for each
-    // 3. Collect indices where distance <= max_distance
-    // 4. Could be optimized with spatial indexing
-    // 5. Could return results sorted by distance
+    // Validate inputs
+    batch_validate_positions(positions)?;
+    validate_position(reference)?;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Find near positions not yet implemented. {}", operation_details),
-        operation: "find_near_positions".to_string(),
-        entity_context: Some(format!("search_{}_positions", positions.len())),
-    })
+    let mut near_positions = Vec::new();
+
+    // Iterate through all positions and check distances
+    for (index, position) in positions.iter().enumerate() {
+        match distance::hyperbolic_distance(reference, position) {
+            Ok(dist) => {
+                if dist <= max_distance {
+                    near_positions.push(index);
+                }
+            }
+            Err(e) => {
+                return Err(HyperQLError::ExecutionError {
+                    message: format!("Failed to compute distance for position[{}]: {}", index, e),
+                    operation: "find_near_positions".to_string(),
+                    entity_context: Some(format!("position_{}", index)),
+                });
+            }
+        }
+    }
+
+    Ok(near_positions)
 }
 
 /// Find positions sorted by distance from reference point
@@ -59,19 +71,34 @@ pub fn positions_sorted_by_distance(
         positions.len(), reference.x, reference.y, reference.z, limit
     );
 
-    // TODO: Implement sorting positions by distance
-    // This would involve:
-    // 1. Compute distances from reference to all positions
-    // 2. Create (index, distance) pairs
-    // 3. Sort by distance (ascending order)
-    // 4. Apply limit if specified
-    // 5. Return indices with their distances for efficiency
+    // Validate inputs
+    batch_validate_positions(positions)?;
+    validate_position(reference)?;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Positions sorted by distance not yet implemented. {}", operation_details),
-        operation: "positions_sorted_by_distance".to_string(),
-        entity_context: Some(format!("sort_{}_positions", positions.len())),
-    })
+    if positions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Compute distances to all positions using batch operation
+    let distances = distance::batch_hyperbolic_distances(reference, positions)?;
+
+    // Create (index, distance) pairs
+    let mut index_distance_pairs: Vec<(usize, f64)> = distances
+        .into_iter()
+        .enumerate()
+        .collect();
+
+    // Sort by distance (ascending order)
+    index_distance_pairs.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Apply limit if specified
+    if let Some(limit_count) = limit {
+        if limit_count > 0 {
+            index_distance_pairs.truncate(limit_count);
+        }
+    }
+
+    Ok(index_distance_pairs)
 }
 
 /// Find k nearest neighbors to reference point
@@ -99,18 +126,10 @@ pub fn k_nearest_neighbors(
         });
     }
 
-    // TODO: Implement k-nearest neighbors
-    // This would involve:
-    // 1. Compute distances to all positions
-    // 2. Use partial sorting or heap to find k smallest
-    // 3. Return (index, distance) pairs for k nearest
-    // 4. Could be optimized with spatial indexing for large k
+    // Use positions_sorted_by_distance with limit = k
+    let sorted_positions = positions_sorted_by_distance(positions, reference, Some(k))?;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("K-nearest neighbors not yet implemented. {}", operation_details),
-        operation: "k_nearest_neighbors".to_string(),
-        entity_context: Some(format!("knn_k{}_from_{}", k, positions.len())),
-    })
+    Ok(sorted_positions)
 }
 
 /// Check if any positions in a set are within radius of center
@@ -124,19 +143,38 @@ pub fn any_within_radius(
         positions.len(), center.x, center.y, center.z, radius
     );
 
-    // TODO: Implement any within radius check
-    // This would involve:
-    // 1. Iterate through positions
-    // 2. Check each against radius constraint
-    // 3. Return true on first match (early termination)
-    // 4. Return false if none match
-    // 5. Could be optimized with spatial indexing
+    // Validate inputs
+    batch_validate_positions(positions)?;
+    validate_position(center)?;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Any within radius not yet implemented. {}", operation_details),
-        operation: "any_within_radius".to_string(),
-        entity_context: Some(format!("check_{}_positions", positions.len())),
-    })
+    if radius <= 0.0 {
+        return Err(HyperQLError::ValidationError {
+            message: "Radius must be positive".to_string(),
+            field: Some("radius".to_string()),
+        });
+    }
+
+    // Iterate through positions and check each against radius constraint
+    // Return true on first match (early termination for efficiency)
+    for position in positions {
+        match distance::hyperbolic_distance(center, position) {
+            Ok(dist) => {
+                if dist <= radius {
+                    return Ok(true);
+                }
+            }
+            Err(e) => {
+                return Err(HyperQLError::ExecutionError {
+                    message: format!("Failed to compute distance: {}", e),
+                    operation: "any_within_radius".to_string(),
+                    entity_context: Some("distance_computation".to_string()),
+                });
+            }
+        }
+    }
+
+    // No positions found within radius
+    Ok(false)
 }
 
 /// Count positions within radius of center
@@ -150,18 +188,38 @@ pub fn count_within_radius(
         positions.len(), center.x, center.y, center.z, radius
     );
 
-    // TODO: Implement counting positions within radius
-    // This would involve:
-    // 1. Iterate through all positions
-    // 2. Check each against radius constraint
-    // 3. Count matches
-    // 4. Could be optimized with spatial indexing
+    // Validate inputs
+    batch_validate_positions(positions)?;
+    validate_position(center)?;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Count within radius not yet implemented. {}", operation_details),
-        operation: "count_within_radius".to_string(),
-        entity_context: Some(format!("count_{}_positions", positions.len())),
-    })
+    if radius <= 0.0 {
+        return Err(HyperQLError::ValidationError {
+            message: "Radius must be positive".to_string(),
+            field: Some("radius".to_string()),
+        });
+    }
+
+    let mut count = 0;
+
+    // Iterate through all positions and count matches
+    for position in positions {
+        match distance::hyperbolic_distance(center, position) {
+            Ok(dist) => {
+                if dist <= radius {
+                    count += 1;
+                }
+            }
+            Err(e) => {
+                return Err(HyperQLError::ExecutionError {
+                    message: format!("Failed to compute distance: {}", e),
+                    operation: "count_within_radius".to_string(),
+                    entity_context: Some("distance_computation".to_string()),
+                });
+            }
+        }
+    }
+
+    Ok(count)
 }
 
 /// Find the centroid (geometric center) of a set of positions
@@ -178,18 +236,98 @@ pub fn hyperbolic_centroid(positions: &[Position3D]) -> Result<Position3D, Hyper
         });
     }
 
-    // TODO: Implement hyperbolic centroid computation
-    // This is more complex than Euclidean centroid due to hyperbolic geometry
-    // 1. Could use iterative algorithms (e.g., Weiszfeld algorithm adapted for hyperbolic space)
-    // 2. Could use exponential/logarithmic maps
-    // 3. Need to handle numerical stability in hyperbolic space
-    // 4. Result should minimize sum of hyperbolic distances to all points
+    // Validate all positions
+    batch_validate_positions(positions)?;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Hyperbolic centroid not yet implemented. {}", operation_details),
-        operation: "hyperbolic_centroid".to_string(),
-        entity_context: Some(format!("centroid_{}_positions", positions.len())),
-    })
+    // For single position, return it as centroid
+    if positions.len() == 1 {
+        return Ok(positions[0].clone());
+    }
+
+    // For hyperbolic centroid, we use an iterative algorithm
+    // Start with the Euclidean centroid as initial guess
+    let mut centroid = Position3D {
+        x: positions.iter().map(|p| p.x).sum::<f64>() / positions.len() as f64,
+        y: positions.iter().map(|p| p.y).sum::<f64>() / positions.len() as f64,
+        z: positions.iter().map(|p| p.z).sum::<f64>() / positions.len() as f64,
+    };
+
+    // Ensure initial guess is inside Poincare ball
+    let initial_norm_sq = centroid.x * centroid.x + centroid.y * centroid.y + centroid.z * centroid.z;
+    if initial_norm_sq >= 1.0 {
+        // Scale down to be inside the ball
+        let scale = 0.5 / initial_norm_sq.sqrt();
+        centroid.x *= scale;
+        centroid.y *= scale;
+        centroid.z *= scale;
+    }
+
+    // Iteratively improve the centroid using a simplified Weiszfeld-like algorithm
+    // adapted for hyperbolic space
+    const MAX_ITERATIONS: usize = 50;
+    const CONVERGENCE_THRESHOLD: f64 = 1e-10;
+
+    for _iteration in 0..MAX_ITERATIONS {
+        let mut weighted_sum_x = 0.0;
+        let mut weighted_sum_y = 0.0;
+        let mut weighted_sum_z = 0.0;
+        let mut total_weight = 0.0;
+
+        for position in positions {
+            // Compute distance from current centroid to this position
+            let dist = distance::hyperbolic_distance(&centroid, position)
+                .map_err(|e| HyperQLError::ExecutionError {
+                    message: format!("Failed to compute distance during centroid iteration: {}", e),
+                    operation: "hyperbolic_centroid".to_string(),
+                    entity_context: Some("iterative_computation".to_string()),
+                })?;
+
+            // Use inverse distance weighting (avoiding division by zero)
+            let weight = if dist < 1e-12 {
+                1e12 // Very large weight for very close points
+            } else {
+                1.0 / dist
+            };
+
+            weighted_sum_x += weight * position.x;
+            weighted_sum_y += weight * position.y;
+            weighted_sum_z += weight * position.z;
+            total_weight += weight;
+        }
+
+        // Compute new centroid estimate
+        let new_centroid = Position3D {
+            x: weighted_sum_x / total_weight,
+            y: weighted_sum_y / total_weight,
+            z: weighted_sum_z / total_weight,
+        };
+
+        // Ensure new centroid is inside Poincare ball
+        let new_norm_sq = new_centroid.x * new_centroid.x + new_centroid.y * new_centroid.y + new_centroid.z * new_centroid.z;
+        let final_new_centroid = if new_norm_sq >= 1.0 {
+            let scale = 0.99 / new_norm_sq.sqrt();
+            Position3D {
+                x: new_centroid.x * scale,
+                y: new_centroid.y * scale,
+                z: new_centroid.z * scale,
+            }
+        } else {
+            new_centroid
+        };
+
+        // Check for convergence
+        let change = ((final_new_centroid.x - centroid.x).powi(2) +
+                     (final_new_centroid.y - centroid.y).powi(2) +
+                     (final_new_centroid.z - centroid.z).powi(2)).sqrt();
+
+        centroid = final_new_centroid;
+
+        if change < CONVERGENCE_THRESHOLD {
+            break;
+        }
+    }
+
+    Ok(centroid)
 }
 
 /// Compute bounding hyperbolic ball for a set of positions
@@ -206,18 +344,113 @@ pub fn bounding_hyperbolic_ball(positions: &[Position3D]) -> Result<(Position3D,
         });
     }
 
-    // TODO: Implement bounding hyperbolic ball computation
-    // This would involve:
-    // 1. Find center that minimizes maximum distance to any point
-    // 2. This is the hyperbolic version of smallest enclosing circle problem
-    // 3. Could use iterative algorithms or approximate solutions
-    // 4. Return (center, radius) pair
+    // Validate all positions
+    batch_validate_positions(positions)?;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Bounding hyperbolic ball not yet implemented. {}", operation_details),
-        operation: "bounding_hyperbolic_ball".to_string(),
-        entity_context: Some(format!("bounding_{}_positions", positions.len())),
-    })
+    // For single position, return it as center with radius 0
+    if positions.len() == 1 {
+        return Ok((positions[0].clone(), 0.0));
+    }
+
+    // Start with the hyperbolic centroid as the center
+    let mut center = hyperbolic_centroid(positions)?;
+
+    // Iteratively improve the center to minimize maximum distance
+    const MAX_ITERATIONS: usize = 20;
+    const IMPROVEMENT_THRESHOLD: f64 = 1e-8;
+
+    for _iteration in 0..MAX_ITERATIONS {
+        // Compute current radius (maximum distance from center to any point)
+        let mut max_distance = 0.0;
+        let mut farthest_point_index = 0;
+
+        for (i, position) in positions.iter().enumerate() {
+            let dist = distance::hyperbolic_distance(&center, position)
+                .map_err(|e| HyperQLError::ExecutionError {
+                    message: format!("Failed to compute distance during bounding ball iteration: {}", e),
+                    operation: "bounding_hyperbolic_ball".to_string(),
+                    entity_context: Some("iterative_computation".to_string()),
+                })?;
+
+            if dist > max_distance {
+                max_distance = dist;
+                farthest_point_index = i;
+            }
+        }
+
+        // Try to improve the center by moving it slightly toward the farthest point
+        let farthest_point = &positions[farthest_point_index];
+
+        // Compute direction from center to farthest point
+        let direction_x = farthest_point.x - center.x;
+        let direction_y = farthest_point.y - center.y;
+        let direction_z = farthest_point.z - center.z;
+
+        let direction_length = (direction_x * direction_x + direction_y * direction_y + direction_z * direction_z).sqrt();
+
+        if direction_length < 1e-12 {
+            break; // Center is already at the farthest point
+        }
+
+        // Normalize direction
+        let unit_dir_x = direction_x / direction_length;
+        let unit_dir_y = direction_y / direction_length;
+        let unit_dir_z = direction_z / direction_length;
+
+        // Try moving center a small step in that direction
+        let step_size = 0.01;
+        let new_center = Position3D {
+            x: center.x + step_size * unit_dir_x,
+            y: center.y + step_size * unit_dir_y,
+            z: center.z + step_size * unit_dir_z,
+        };
+
+        // Ensure new center is inside Poincare ball
+        let new_center_norm_sq = new_center.x * new_center.x + new_center.y * new_center.y + new_center.z * new_center.z;
+        let final_new_center = if new_center_norm_sq >= 1.0 {
+            // Keep the old center if the new one would be outside the ball
+            center.clone()
+        } else {
+            new_center
+        };
+
+        // Check if this improves the maximum distance
+        let mut new_max_distance = 0.0;
+        let mut improvement_found = true;
+
+        for position in positions {
+            match distance::hyperbolic_distance(&final_new_center, position) {
+                Ok(dist) => {
+                    if dist > new_max_distance {
+                        new_max_distance = dist;
+                    }
+                }
+                Err(_) => {
+                    improvement_found = false;
+                    break;
+                }
+            }
+        }
+
+        // If the new center improves the max distance, use it
+        if improvement_found && new_max_distance < max_distance - IMPROVEMENT_THRESHOLD {
+            center = final_new_center;
+        } else {
+            // No significant improvement, stop iterating
+            break;
+        }
+    }
+
+    // Compute final radius
+    let mut final_radius = 0.0;
+    for position in positions {
+        let dist = distance::hyperbolic_distance(&center, position)?;
+        if dist > final_radius {
+            final_radius = dist;
+        }
+    }
+
+    Ok((center, final_radius))
 }
 
 /// Validate that a position is within the Poincaré ball
@@ -264,10 +497,16 @@ mod tests {
         let max_distance = 0.25;
 
         let result = find_near_positions(&positions, &reference, max_distance);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Find near positions"));
-        assert!(error_msg.contains("3 candidates"));
+        assert!(result.is_ok());
+        let near_indices = result.unwrap();
+        // The first two positions should be within distance 0.25 from origin
+        // pos[0]: (0.1, 0.0, 0.0) - distance ≈ 0.1
+        // pos[1]: (0.0, 0.2, 0.0) - distance ≈ 0.2
+        // pos[2]: (0.0, 0.0, 0.3) - distance ≈ 0.3 (should be excluded)
+        assert_eq!(near_indices.len(), 2);
+        assert!(near_indices.contains(&0));
+        assert!(near_indices.contains(&1));
+        assert!(!near_indices.contains(&2));
 
         // Test validation
         let result_invalid = find_near_positions(&positions, &reference, -1.0);
@@ -286,10 +525,16 @@ mod tests {
         let reference = Position3D { x: 0.0, y: 0.0, z: 0.0 };
 
         let result = positions_sorted_by_distance(&positions, &reference, Some(2));
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Sort positions by distance"));
-        assert!(error_msg.contains("limit=Some(2)"));
+        assert!(result.is_ok());
+        let sorted_positions = result.unwrap();
+        // Should return 2 closest positions
+        assert_eq!(sorted_positions.len(), 2);
+        // Position 1 (index 1) at (0.1, 0.0, 0.0) should be closest
+        assert_eq!(sorted_positions[0].0, 1);
+        // Position 0 (index 0) at (0.3, 0.0, 0.0) should be second
+        assert_eq!(sorted_positions[1].0, 0);
+        // Distances should be in ascending order
+        assert!(sorted_positions[0].1 <= sorted_positions[1].1);
     }
 
     #[test]
@@ -303,10 +548,11 @@ mod tests {
 
         // Valid k
         let result = k_nearest_neighbors(&positions, &reference, 2);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("K-nearest neighbors"));
-        assert!(error_msg.contains("k=2"));
+        assert!(result.is_ok());
+        let knn_result = result.unwrap();
+        assert_eq!(knn_result.len(), 2);
+        // Should return 2 nearest neighbors in distance order
+        assert!(knn_result[0].1 <= knn_result[1].1);
 
         // Invalid k (zero)
         let result_zero = k_nearest_neighbors(&positions, &reference, 0);
@@ -332,15 +578,18 @@ mod tests {
 
         // Any within radius
         let result_any = any_within_radius(&positions, &center, radius);
-        assert!(result_any.is_err());
-        let error_msg_any = result_any.unwrap_err().to_string();
-        assert!(error_msg_any.contains("Any within radius"));
+        assert!(result_any.is_ok());
+        let has_any = result_any.unwrap();
+        // Position (0.1, 0.0, 0.0) has distance ≈ 0.1, which is < 0.15
+        assert!(has_any);
 
         // Count within radius
         let result_count = count_within_radius(&positions, &center, radius);
-        assert!(result_count.is_err());
-        let error_msg_count = result_count.unwrap_err().to_string();
-        assert!(error_msg_count.contains("Count within radius"));
+        assert!(result_count.is_ok());
+        let count = result_count.unwrap();
+        // Position (0.1, 0.0, 0.0) has distance ≈ 0.1 < 0.15 (included)
+        // Position (0.0, 0.2, 0.0) has distance ≈ 0.2 > 0.15 (excluded)
+        assert_eq!(count, 1);
     }
 
     #[test]
@@ -352,15 +601,25 @@ mod tests {
 
         // Hyperbolic centroid
         let result_centroid = hyperbolic_centroid(&positions);
-        assert!(result_centroid.is_err());
-        let error_msg_centroid = result_centroid.unwrap_err().to_string();
-        assert!(error_msg_centroid.contains("Hyperbolic centroid"));
+        assert!(result_centroid.is_ok());
+        let centroid = result_centroid.unwrap();
+        // Centroid should be inside Poincaré ball
+        let centroid_norm_sq = centroid.x * centroid.x + centroid.y * centroid.y + centroid.z * centroid.z;
+        assert!(centroid_norm_sq < 1.0);
+        // Should be somewhere between the two points
+        assert!(centroid.x > 0.0 && centroid.x < 0.3);
+        assert!(centroid.y > 0.0 && centroid.y < 0.3);
+        assert!(centroid.z > 0.0 && centroid.z < 0.3);
 
         // Bounding ball
         let result_bounding = bounding_hyperbolic_ball(&positions);
-        assert!(result_bounding.is_err());
-        let error_msg_bounding = result_bounding.unwrap_err().to_string();
-        assert!(error_msg_bounding.contains("Bounding hyperbolic ball"));
+        assert!(result_bounding.is_ok());
+        let (center, radius) = result_bounding.unwrap();
+        // Center should be inside Poincaré ball
+        let center_norm_sq = center.x * center.x + center.y * center.y + center.z * center.z;
+        assert!(center_norm_sq < 1.0);
+        // Radius should be positive
+        assert!(radius > 0.0);
 
         // Empty set validation
         let empty_positions: Vec<Position3D> = vec![];

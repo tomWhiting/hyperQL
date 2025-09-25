@@ -225,4 +225,108 @@ mod integration_tests {
 
         println!("\n🎉 All end-to-end tests passed! HyperQL basic SELECT WHERE functionality is working.");
     }
+
+    #[test]
+    fn test_stream_and_timeseries_functionality() {
+        use crate::functions::streams::operations::{stream_create, stream_produce, stream_consume};
+        use crate::functions::streams::windowing::{window_tumbling};
+        use crate::functions::timeseries::temporal::{time_bucket, time_diff, extract};
+        use crate::functions::timeseries::window::{moving_average, exponential_smoothing, lag};
+        use std::collections::HashMap;
+        use chrono::Utc;
+
+        println!("Testing stream and time series functionality...");
+
+        // Test 1: Stream Operations
+        println!("\n1. Testing Stream Operations");
+
+        // Create a stream
+        let mut stream_config = HashMap::new();
+        stream_config.insert("buffer_size".to_string(), Value::Int(100));
+        stream_config.insert("max_events".to_string(), Value::Int(50));
+
+        let create_result = stream_create("test_stream".to_string(), stream_config);
+        assert!(create_result.is_ok());
+        println!("✓ Stream created successfully");
+
+        // Produce events to stream
+        for i in 1..=10 {
+            let mut event_data = HashMap::new();
+            event_data.insert("value".to_string(), Value::Int(i * 10));
+            event_data.insert("timestamp".to_string(), Value::Timestamp(Utc::now().timestamp_millis()));
+
+            let produce_result = stream_produce("test_stream".to_string(), event_data);
+            assert!(produce_result.is_ok());
+        }
+        println!("✓ Produced 10 events to stream");
+
+        // Consume events from stream
+        let mut consume_config = HashMap::new();
+        consume_config.insert("limit".to_string(), Value::Int(5));
+
+        let consume_result = stream_consume("test_stream".to_string(), consume_config);
+        assert!(consume_result.is_ok());
+        if let Value::List(events) = consume_result.unwrap() {
+            assert_eq!(events.len(), 5);
+            println!("✓ Consumed {} events from stream", events.len());
+        }
+
+        // Test 2: Window Functions
+        println!("\n2. Testing Stream Window Functions");
+
+        let window_result = window_tumbling("test_stream".to_string(), 1000, "count".to_string());
+        assert!(window_result.is_ok());
+        println!("✓ Tumbling window function executed");
+
+        // Test 3: Time Series Temporal Functions
+        println!("\n3. Testing Time Series Temporal Functions");
+
+        let now = Utc::now().timestamp_millis();
+
+        // Test time_bucket
+        let bucket_result = time_bucket(now, 1, "hour");
+        assert!(bucket_result.is_ok());
+        println!("✓ Time bucket function executed");
+
+        // Test time_diff
+        let diff_result = time_diff(now, now + 3600000, Some("hours"));
+        assert!(diff_result.is_ok());
+        if let Value::Int(hours) = diff_result.unwrap() {
+            assert_eq!(hours, 1);
+            println!("✓ Time difference calculated: {} hours", hours);
+        }
+
+        // Test extract
+        let extract_result = extract(now, "year");
+        assert!(extract_result.is_ok());
+        println!("✓ Timestamp component extracted");
+
+        // Test 4: Time Series Window Functions
+        println!("\n4. Testing Time Series Window Functions");
+
+        let test_values = vec![
+            Value::Int(10), Value::Int(20), Value::Int(30),
+            Value::Int(40), Value::Int(50)
+        ];
+
+        // Test moving_average
+        let ma_result = moving_average(test_values.clone(), 3);
+        assert!(ma_result.is_ok());
+        println!("✓ Moving average calculated");
+
+        // Test exponential_smoothing
+        let es_result = exponential_smoothing(test_values.clone(), 0.3);
+        assert!(es_result.is_ok());
+        println!("✓ Exponential smoothing calculated");
+
+        // Test lag
+        let lag_result = lag(test_values.clone(), 1, Some(Value::Int(0)));
+        assert!(lag_result.is_ok());
+        if let Value::List(lag_values) = lag_result.unwrap() {
+            assert_eq!(lag_values.len(), 5);
+            println!("✓ Lag function calculated for {} values", lag_values.len());
+        }
+
+        println!("\n🎉 All stream and time series tests passed! Real-time data processing functionality is working.");
+    }
 }

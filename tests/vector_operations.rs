@@ -234,47 +234,41 @@ fn test_knn_ordering_determination() {
 fn test_vector_functions_integration() {
     use hyperQL::functions::vector::similarity::*;
     use hyperQL::functions::vector::distance::*;
-    
+
     let vec_a = vec![1.0, 2.0, 3.0];
     let vec_b = vec![0.5, 1.5, 2.5];
     let vector_name = "test_embedding";
-    
+
     // Test cosine similarity function
     let cosine_result = cosine_similarity(&vec_a, &vec_b, vector_name);
-    assert!(cosine_result.is_err());
-    let error_msg = cosine_result.unwrap_err().to_string();
-    assert!(error_msg.contains("Cosine similarity"));
-    assert!(error_msg.contains("test_embedding"));
-    assert!(error_msg.contains("not yet implemented"));
-    assert!(error_msg.contains("dimensions: 3 x 3"));
-    
+    assert!(cosine_result.is_ok());
+    let similarity = cosine_result.unwrap();
+    assert!(similarity > 0.0 && similarity <= 1.0);
+
     // Test Euclidean distance function
     let euclidean_result = euclidean_distance(&vec_a, &vec_b, vector_name);
-    assert!(euclidean_result.is_err());
-    let distance_error = euclidean_result.unwrap_err().to_string();
-    assert!(distance_error.contains("Euclidean distance"));
-    assert!(distance_error.contains("test_embedding"));
-    
+    assert!(euclidean_result.is_ok());
+    let distance = euclidean_result.unwrap();
+    assert!(distance > 0.0);
+
     // Test sparse vector functions
     let indices_a = vec![0, 2, 5];
     let values_a = vec![1.0, 0.5, 2.0];
     let indices_b = vec![1, 2, 3, 5];
     let values_b = vec![0.8, 0.6, 1.2, 1.8];
     let sparse_vector_name = "sparse_keywords";
-    
+
     let jaccard_result = jaccard_similarity(&indices_a, &values_a, &indices_b, &values_b, sparse_vector_name);
-    assert!(jaccard_result.is_err());
-    let jaccard_error = jaccard_result.unwrap_err().to_string();
-    assert!(jaccard_error.contains("Jaccard similarity"));
-    assert!(jaccard_error.contains("sparse_keywords"));
-    assert!(jaccard_error.contains("nnz: 3 x 4"));
+    assert!(jaccard_result.is_ok());
+    let jaccard_sim = jaccard_result.unwrap();
+    assert!(jaccard_sim >= 0.0 && jaccard_sim <= 1.0);
 }
 
 #[test]
 fn test_colbert_vector_operations() {
     use hyperQL::functions::vector::similarity::colbert_similarity;
     use hyperQL::functions::vector::distance::colbert_distance;
-    
+
     let tokens_a = vec![
         vec![0.1, 0.2, 0.3],
         vec![0.4, 0.5, 0.6],
@@ -284,21 +278,18 @@ fn test_colbert_vector_operations() {
         vec![0.45, 0.55, 0.65],
     ];
     let vector_name = "colbert_tokens";
-    
+
     // Test ColBERT similarity
     let similarity_result = colbert_similarity(&tokens_a, &tokens_b, vector_name);
-    assert!(similarity_result.is_err());
-    let error_msg = similarity_result.unwrap_err().to_string();
-    assert!(error_msg.contains("ColBERT similarity"));
-    assert!(error_msg.contains("colbert_tokens"));
-    assert!(error_msg.contains("tokens: 2 x 2"));
-    
+    assert!(similarity_result.is_ok());
+    let similarity = similarity_result.unwrap();
+    assert!(similarity >= -1.0 && similarity <= 1.0);
+
     // Test ColBERT distance
     let distance_result = colbert_distance(&tokens_a, &tokens_b, vector_name);
-    assert!(distance_result.is_err());
-    let distance_error = distance_result.unwrap_err().to_string();
-    assert!(distance_error.contains("ColBERT distance"));
-    assert!(distance_error.contains("colbert_tokens"));
+    assert!(distance_result.is_ok());
+    let distance = distance_result.unwrap();
+    assert!(distance >= 0.0 && distance <= 2.0);
 }
 
 #[test]
@@ -434,19 +425,18 @@ fn test_threshold_operations() {
     
     let vector_name = "test_vec";
     
-    // Test threshold filtering
+    // Test threshold filtering - score below threshold
     let result = apply_similarity_threshold(0.75, Some(0.8), vector_name);
-    assert!(result.is_err());
-    let error_msg = result.unwrap_err().to_string();
-    assert!(error_msg.contains("Threshold filtering"));
-    assert!(error_msg.contains("test_vec"));
-    assert!(error_msg.contains("score=0.7500"));
-    assert!(error_msg.contains("threshold=0.8000"));
-    assert!(error_msg.contains("passes=false"));
-    
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), false);  // Score 0.75 < threshold 0.8
+
+    // Test threshold filtering - score above threshold
+    let result_pass = apply_similarity_threshold(0.85, Some(0.8), vector_name);
+    assert!(result_pass.is_ok());
+    assert_eq!(result_pass.unwrap(), true);  // Score 0.85 > threshold 0.8
+
     // Test no threshold case
     let result_no_threshold = apply_similarity_threshold(0.75, None, vector_name);
-    assert!(result_no_threshold.is_err());
-    let error_no_threshold = result_no_threshold.unwrap_err().to_string();
-    assert!(error_no_threshold.contains("No threshold filtering"));
+    assert!(result_no_threshold.is_ok());
+    assert_eq!(result_no_threshold.unwrap(), true);  // Always passes when no threshold
 }

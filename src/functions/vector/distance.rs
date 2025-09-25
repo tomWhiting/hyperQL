@@ -30,24 +30,52 @@ pub fn compute_named_vector_distance(
     metric: &SimilarityMetric,
     vector_type: &VectorType,
 ) -> Result<f64, HyperQLError> {
-    let operation_details = format!(
-        "Named vector distance: vector_name='{}', metric={:?}, vector_type={:?}",
-        vector_name, metric, vector_type
-    );
+    // Extract the named vector from entity_vectors
+    let entity_vector = entity_vectors.get(vector_name).ok_or_else(|| {
+        HyperQLError::ExecutionError {
+            message: format!("Named vector '{}' not found in entity", vector_name),
+            operation: "compute_named_vector_distance".to_string(),
+            entity_context: Some(format!("vector_name={}", vector_name)),
+        }
+    })?;
 
-    // TODO: Implement actual named vector distance computation
-    // This would involve:
-    // 1. Extract the named vector from entity_vectors
-    // 2. Validate vector compatibility with reference_vector
-    // 3. Apply the appropriate distance metric
-    // 4. Handle different vector types (Dense, Sparse, ColBERT)
-    // 5. Return distance value (lower = more similar)
+    // Apply the appropriate distance metric based on vector type
+    let distance = match vector_type {
+        VectorType::Dense { .. } => {
+            let entity_vec = extract_dense_vector(entity_vector, vector_name)?;
+            let reference_vec = extract_dense_vector(reference_vector, "reference")?;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Named vector distance not yet implemented. {}", operation_details),
-        operation: "compute_named_vector_distance".to_string(),
-        entity_context: Some(format!("vector_name={}", vector_name)),
-    })
+            match metric {
+                SimilarityMetric::Euclidean => euclidean_distance(&entity_vec, &reference_vec, vector_name)?,
+                SimilarityMetric::Manhattan => manhattan_distance(&entity_vec, &reference_vec, vector_name)?,
+                SimilarityMetric::Cosine => cosine_distance(&entity_vec, &reference_vec, vector_name)?,
+                _ => return Err(HyperQLError::ValidationError {
+                    message: format!("Distance metric {:?} not supported for dense vectors", metric),
+                    field: Some("metric".to_string()),
+                }),
+            }
+        },
+        VectorType::Sparse { .. } => {
+            let (entity_indices, entity_values) = extract_sparse_vector(entity_vector, vector_name)?;
+            let (ref_indices, ref_values) = extract_sparse_vector(reference_vector, "reference")?;
+
+            match metric {
+                SimilarityMetric::Jaccard => jaccard_distance(&entity_indices, &entity_values, &ref_indices, &ref_values, vector_name)?,
+                _ => return Err(HyperQLError::ValidationError {
+                    message: format!("Distance metric {:?} not supported for sparse vectors", metric),
+                    field: Some("metric".to_string()),
+                }),
+            }
+        },
+        VectorType::ColBERT { .. } => {
+            let entity_tokens = extract_colbert_vector(entity_vector, vector_name)?;
+            let reference_tokens = extract_colbert_vector(reference_vector, "reference")?;
+
+            colbert_distance(&entity_tokens, &reference_tokens, vector_name)?
+        },
+    };
+
+    Ok(distance)
 }
 
 /// Compute Euclidean distance between named dense vectors
@@ -56,24 +84,33 @@ pub fn euclidean_distance(
     vector_b: &[f64],
     vector_name: &str,
 ) -> Result<f64, HyperQLError> {
-    let operation_details = format!(
-        "Euclidean distance computation for named vector: '{}', dimensions: {} x {}",
-        vector_name, vector_a.len(), vector_b.len()
-    );
+    // Validate dimensions match
+    if vector_a.len() != vector_b.len() {
+        return Err(HyperQLError::ValidationError {
+            message: format!(
+                "Vector dimension mismatch for '{}': {} vs {}",
+                vector_name, vector_a.len(), vector_b.len()
+            ),
+            field: Some("dimensions".to_string()),
+        });
+    }
 
-    // TODO: Implement actual Euclidean distance computation
-    // distance = √(Σᵢ (aᵢ - bᵢ)²)
-    // This would involve:
-    // 1. Compute squared differences: (aᵢ - bᵢ)²
-    // 2. Sum squared differences
-    // 3. Take square root
-    // 4. Validate input dimensions match
+    if vector_a.is_empty() {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Empty vectors not supported for '{}'", vector_name),
+            field: Some("vector_length".to_string()),
+        });
+    }
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Euclidean distance not yet implemented. {}", operation_details),
-        operation: "euclidean_distance".to_string(),
-        entity_context: Some(format!("vector_name={}", vector_name)),
-    })
+    // Compute Euclidean distance: √(Σᵢ (aᵢ - bᵢ)²)
+    let squared_distance: f64 = vector_a.iter().zip(vector_b.iter())
+        .map(|(a, b)| {
+            let diff = a - b;
+            diff * diff
+        })
+        .sum();
+
+    Ok(squared_distance.sqrt())
 }
 
 /// Compute Manhattan distance between named dense vectors
@@ -82,23 +119,30 @@ pub fn manhattan_distance(
     vector_b: &[f64],
     vector_name: &str,
 ) -> Result<f64, HyperQLError> {
-    let operation_details = format!(
-        "Manhattan distance computation for named vector: '{}', dimensions: {} x {}",
-        vector_name, vector_a.len(), vector_b.len()
-    );
+    // Validate dimensions match
+    if vector_a.len() != vector_b.len() {
+        return Err(HyperQLError::ValidationError {
+            message: format!(
+                "Vector dimension mismatch for '{}': {} vs {}",
+                vector_name, vector_a.len(), vector_b.len()
+            ),
+            field: Some("dimensions".to_string()),
+        });
+    }
 
-    // TODO: Implement actual Manhattan distance computation
-    // distance = Σᵢ |aᵢ - bᵢ|
-    // This would involve:
-    // 1. Compute absolute differences: |aᵢ - bᵢ|
-    // 2. Sum absolute differences
-    // 3. Validate input dimensions match
+    if vector_a.is_empty() {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Empty vectors not supported for '{}'", vector_name),
+            field: Some("vector_length".to_string()),
+        });
+    }
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Manhattan distance not yet implemented. {}", operation_details),
-        operation: "manhattan_distance".to_string(),
-        entity_context: Some(format!("vector_name={}", vector_name)),
-    })
+    // Compute Manhattan distance: Σᵢ |aᵢ - bᵢ|
+    let distance: f64 = vector_a.iter().zip(vector_b.iter())
+        .map(|(a, b)| (a - b).abs())
+        .sum();
+
+    Ok(distance)
 }
 
 /// Compute generalized Minkowski distance between named vectors
@@ -108,24 +152,54 @@ pub fn minkowski_distance(
     p: f64,
     vector_name: &str,
 ) -> Result<f64, HyperQLError> {
-    let operation_details = format!(
-        "Minkowski distance (p={}) computation for named vector: '{}', dimensions: {} x {}",
-        p, vector_name, vector_a.len(), vector_b.len()
-    );
+    // Validate dimensions match
+    if vector_a.len() != vector_b.len() {
+        return Err(HyperQLError::ValidationError {
+            message: format!(
+                "Vector dimension mismatch for '{}': {} vs {}",
+                vector_name, vector_a.len(), vector_b.len()
+            ),
+            field: Some("dimensions".to_string()),
+        });
+    }
 
-    // TODO: Implement actual Minkowski distance computation
-    // distance = (Σᵢ |aᵢ - bᵢ|^p)^(1/p)
-    // This would involve:
-    // 1. Compute powered absolute differences: |aᵢ - bᵢ|^p
-    // 2. Sum powered differences
-    // 3. Take p-th root
-    // 4. Handle special cases (p=1: Manhattan, p=2: Euclidean, p=∞: Chebyshev)
+    if vector_a.is_empty() {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Empty vectors not supported for '{}'", vector_name),
+            field: Some("vector_length".to_string()),
+        });
+    }
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Minkowski distance not yet implemented. {}", operation_details),
-        operation: "minkowski_distance".to_string(),
-        entity_context: Some(format!("vector_name={}", vector_name)),
-    })
+    if p <= 0.0 {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Minkowski p parameter must be positive, got: {}", p),
+            field: Some("p".to_string()),
+        });
+    }
+
+    // Handle special cases for efficiency
+    if (p - 1.0).abs() < f64::EPSILON {
+        // p = 1: Manhattan distance
+        return manhattan_distance(vector_a, vector_b, vector_name);
+    }
+    if (p - 2.0).abs() < f64::EPSILON {
+        // p = 2: Euclidean distance
+        return euclidean_distance(vector_a, vector_b, vector_name);
+    }
+    if p.is_infinite() {
+        // p = infinity: Chebyshev distance (max difference)
+        let max_diff = vector_a.iter().zip(vector_b.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f64, |acc, x| acc.max(x));
+        return Ok(max_diff);
+    }
+
+    // General case: distance = (Σᵢ |aᵢ - bᵢ|^p)^(1/p)
+    let powered_sum: f64 = vector_a.iter().zip(vector_b.iter())
+        .map(|(a, b)| (a - b).abs().powf(p))
+        .sum();
+
+    Ok(powered_sum.powf(1.0 / p))
 }
 
 /// Compute Cosine distance between named vectors (1 - cosine_similarity)
@@ -134,24 +208,41 @@ pub fn cosine_distance(
     vector_b: &[f64],
     vector_name: &str,
 ) -> Result<f64, HyperQLError> {
-    let operation_details = format!(
-        "Cosine distance computation for named vector: '{}', dimensions: {} x {}",
-        vector_name, vector_a.len(), vector_b.len()
-    );
+    // Validate dimensions match
+    if vector_a.len() != vector_b.len() {
+        return Err(HyperQLError::ValidationError {
+            message: format!(
+                "Vector dimension mismatch for '{}': {} vs {}",
+                vector_name, vector_a.len(), vector_b.len()
+            ),
+            field: Some("dimensions".to_string()),
+        });
+    }
 
-    // TODO: Implement actual cosine distance computation
-    // cosine_distance = 1 - cosine_similarity
-    // cosine_similarity = ⟨a,b⟩ / (||a|| ||b||)
-    // This would involve:
-    // 1. Compute cosine similarity
-    // 2. Return 1 - similarity for distance semantics
-    // 3. Handle zero vectors gracefully
+    if vector_a.is_empty() {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Empty vectors not supported for '{}'", vector_name),
+            field: Some("vector_length".to_string()),
+        });
+    }
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Cosine distance not yet implemented. {}", operation_details),
-        operation: "cosine_distance".to_string(),
-        entity_context: Some(format!("vector_name={}", vector_name)),
-    })
+    // Compute cosine similarity first
+    let dot_product: f64 = vector_a.iter().zip(vector_b.iter())
+        .map(|(a, b)| a * b)
+        .sum();
+
+    let norm_a: f64 = vector_a.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let norm_b: f64 = vector_b.iter().map(|x| x * x).sum::<f64>().sqrt();
+
+    // Handle zero vectors - cosine distance is 1.0
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return Ok(1.0);
+    }
+
+    let cosine_similarity = (dot_product / (norm_a * norm_b)).clamp(-1.0, 1.0);
+
+    // Return cosine distance = 1 - cosine_similarity
+    Ok(1.0 - cosine_similarity)
 }
 
 /// Compute Hamming distance between binary named vectors
@@ -160,23 +251,30 @@ pub fn hamming_distance(
     vector_b: &[bool],
     vector_name: &str,
 ) -> Result<u32, HyperQLError> {
-    let operation_details = format!(
-        "Hamming distance computation for binary named vector: '{}', dimensions: {} x {}",
-        vector_name, vector_a.len(), vector_b.len()
-    );
+    // Validate dimensions match
+    if vector_a.len() != vector_b.len() {
+        return Err(HyperQLError::ValidationError {
+            message: format!(
+                "Vector dimension mismatch for '{}': {} vs {}",
+                vector_name, vector_a.len(), vector_b.len()
+            ),
+            field: Some("dimensions".to_string()),
+        });
+    }
 
-    // TODO: Implement actual Hamming distance computation
-    // distance = number of positions where bits differ
-    // This would involve:
-    // 1. XOR vectors element-wise
-    // 2. Count number of true values
-    // 3. Return count as distance
+    if vector_a.is_empty() {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Empty vectors not supported for '{}'", vector_name),
+            field: Some("vector_length".to_string()),
+        });
+    }
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Hamming distance not yet implemented. {}", operation_details),
-        operation: "hamming_distance".to_string(),
-        entity_context: Some(format!("vector_name={}", vector_name)),
-    })
+    // Count positions where bits differ (XOR operation)
+    let hamming_distance = vector_a.iter().zip(vector_b.iter())
+        .map(|(a, b)| if a != b { 1u32 } else { 0u32 })
+        .sum();
+
+    Ok(hamming_distance)
 }
 
 /// Compute Jaccard distance between sparse named vectors (1 - jaccard_similarity)
@@ -187,23 +285,58 @@ pub fn jaccard_distance(
     values_b: &[f64],
     vector_name: &str,
 ) -> Result<f64, HyperQLError> {
-    let operation_details = format!(
-        "Jaccard distance computation for sparse named vector: '{}', nnz: {} x {}",
-        vector_name, indices_a.len(), indices_b.len()
-    );
+    // Validate input consistency
+    if indices_a.len() != values_a.len() {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Inconsistent sparse vector A for '{}': indices={}, values={}",
+                vector_name, indices_a.len(), values_a.len()),
+            field: Some("vector_a".to_string()),
+        });
+    }
 
-    // TODO: Implement actual Jaccard distance computation
-    // jaccard_distance = 1 - jaccard_similarity
-    // jaccard_similarity = |A ∩ B| / |A ∪ B|
-    // This would involve:
-    // 1. Compute Jaccard similarity for sparse vectors
-    // 2. Return 1 - similarity for distance semantics
+    if indices_b.len() != values_b.len() {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Inconsistent sparse vector B for '{}': indices={}, values={}",
+                vector_name, indices_b.len(), values_b.len()),
+            field: Some("vector_b".to_string()),
+        });
+    }
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Jaccard distance not yet implemented. {}", operation_details),
-        operation: "jaccard_distance".to_string(),
-        entity_context: Some(format!("vector_name={}", vector_name)),
-    })
+    // Convert to HashMaps for efficient lookups
+    let map_a: HashMap<u32, f64> = indices_a.iter().zip(values_a.iter())
+        .map(|(&idx, &val)| (idx, val.abs()))
+        .collect();
+
+    let map_b: HashMap<u32, f64> = indices_b.iter().zip(values_b.iter())
+        .map(|(&idx, &val)| (idx, val.abs()))
+        .collect();
+
+    let mut intersection_sum = 0.0;
+    let mut union_sum = 0.0;
+
+    // Get all unique indices from both vectors
+    let all_indices: std::collections::HashSet<u32> = map_a.keys()
+        .chain(map_b.keys())
+        .copied()
+        .collect();
+
+    // For each index, compute min (intersection) and max (union) values
+    for &idx in &all_indices {
+        let val_a = map_a.get(&idx).copied().unwrap_or(0.0);
+        let val_b = map_b.get(&idx).copied().unwrap_or(0.0);
+
+        intersection_sum += val_a.min(val_b);
+        union_sum += val_a.max(val_b);
+    }
+
+    // Handle empty vectors
+    if union_sum == 0.0 {
+        return Ok(if intersection_sum == 0.0 { 0.0 } else { 1.0 });
+    }
+
+    // Compute Jaccard similarity and return distance = 1 - similarity
+    let jaccard_similarity = intersection_sum / union_sum;
+    Ok(1.0 - jaccard_similarity)
 }
 
 /// Compute ColBERT-style multi-vector distance (max-sim converted to distance)
@@ -212,23 +345,168 @@ pub fn colbert_distance(
     tokens_b: &[Vec<f64>],
     vector_name: &str,
 ) -> Result<f64, HyperQLError> {
-    let operation_details = format!(
-        "ColBERT distance computation for named vector: '{}', tokens: {} x {}",
-        vector_name, tokens_a.len(), tokens_b.len()
-    );
+    if tokens_a.is_empty() || tokens_b.is_empty() {
+        return Err(HyperQLError::ValidationError {
+            message: format!("Empty token sequences not supported for ColBERT vector '{}'", vector_name),
+            field: Some("token_count".to_string()),
+        });
+    }
 
-    // TODO: Implement actual ColBERT distance computation
-    // Convert ColBERT max-sim similarity to distance measure
-    // This would involve:
-    // 1. Compute ColBERT similarity
-    // 2. Convert to distance: distance = max_possible_sim - actual_sim
-    // 3. Normalize appropriately for distance semantics
+    // Validate that all token vectors have the same dimensions
+    let expected_dim = tokens_a[0].len();
+    for (i, token) in tokens_a.iter().enumerate() {
+        if token.len() != expected_dim {
+            return Err(HyperQLError::ValidationError {
+                message: format!("Token dimension mismatch in tokens_a[{}] for '{}': expected {}, got {}",
+                    i, vector_name, expected_dim, token.len()),
+                field: Some("token_dimensions".to_string()),
+            });
+        }
+    }
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("ColBERT distance not yet implemented. {}", operation_details),
-        operation: "colbert_distance".to_string(),
-        entity_context: Some(format!("vector_name={}", vector_name)),
-    })
+    for (i, token) in tokens_b.iter().enumerate() {
+        if token.len() != expected_dim {
+            return Err(HyperQLError::ValidationError {
+                message: format!("Token dimension mismatch in tokens_b[{}] for '{}': expected {}, got {}",
+                    i, vector_name, expected_dim, token.len()),
+                field: Some("token_dimensions".to_string()),
+            });
+        }
+    }
+
+    // Compute ColBERT similarity first
+    let mut total_similarity = 0.0;
+
+    for token_a in tokens_a {
+        let mut max_similarity = f64::NEG_INFINITY;
+
+        // Find the maximum cosine similarity between this token in A and all tokens in B
+        for token_b in tokens_b {
+            let similarity = cosine_similarity_raw(token_a, token_b)?;
+            if similarity > max_similarity {
+                max_similarity = similarity;
+            }
+        }
+
+        total_similarity += max_similarity;
+    }
+
+    // Normalize by the number of tokens in A to get average max similarity
+    let colbert_similarity = total_similarity / tokens_a.len() as f64;
+
+    // Convert similarity to distance. Since cosine similarity is in [-1, 1],
+    // the maximum possible similarity is 1.0, so distance = 1 - similarity
+    // This gives us a distance in [0, 2] where 0 = identical, 2 = opposite
+    Ok(1.0 - colbert_similarity)
+}
+
+// Helper functions for vector extraction and operations
+
+/// Extract dense vector from Value
+fn extract_dense_vector(value: &Value, context: &str) -> Result<Vec<f64>, HyperQLError> {
+    match value {
+        Value::Vector(vector) => Ok(vector.dimensions.clone()),
+        Value::List(values) => {
+            let mut result = Vec::with_capacity(values.len());
+            for (i, v) in values.iter().enumerate() {
+                match v {
+                    Value::Float(f) => result.push(*f),
+                    Value::Int(i) => result.push(*i as f64),
+                    _ => return Err(HyperQLError::TypeError {
+                        expected: "numeric value".to_string(),
+                        found: format!("{:?}", v),
+                        context: format!("dense vector {} at index {}", context, i),
+                    }),
+                }
+            }
+            Ok(result)
+        }
+        _ => Err(HyperQLError::TypeError {
+            expected: "Vector or List".to_string(),
+            found: format!("{:?}", value),
+            context: format!("dense vector {}", context),
+        }),
+    }
+}
+
+/// Extract sparse vector from Value (returns indices and values)
+fn extract_sparse_vector(value: &Value, context: &str) -> Result<(Vec<u32>, Vec<f64>), HyperQLError> {
+    match value {
+        Value::Map(map) => {
+            let mut indices = Vec::new();
+            let mut values = Vec::new();
+
+            for (key, val) in map {
+                let index: u32 = key.parse().map_err(|_| HyperQLError::TypeError {
+                    expected: "numeric index".to_string(),
+                    found: key.clone(),
+                    context: format!("sparse vector {} key", context),
+                })?;
+
+                let value: f64 = match val {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(HyperQLError::TypeError {
+                        expected: "numeric value".to_string(),
+                        found: format!("{:?}", val),
+                        context: format!("sparse vector {} value", context),
+                    }),
+                };
+
+                indices.push(index);
+                values.push(value);
+            }
+
+            Ok((indices, values))
+        }
+        _ => Err(HyperQLError::TypeError {
+            expected: "Map".to_string(),
+            found: format!("{:?}", value),
+            context: format!("sparse vector {}", context),
+        }),
+    }
+}
+
+/// Extract ColBERT multi-vector from Value
+fn extract_colbert_vector(value: &Value, context: &str) -> Result<Vec<Vec<f64>>, HyperQLError> {
+    match value {
+        Value::List(outer_list) => {
+            let mut result = Vec::with_capacity(outer_list.len());
+            for (i, token_value) in outer_list.iter().enumerate() {
+                let token_vector = extract_dense_vector(token_value, &format!("{}_token_{}", context, i))?;
+                result.push(token_vector);
+            }
+            Ok(result)
+        }
+        _ => Err(HyperQLError::TypeError {
+            expected: "List of vectors".to_string(),
+            found: format!("{:?}", value),
+            context: format!("ColBERT vector {}", context),
+        }),
+    }
+}
+
+/// Compute cosine similarity between two vectors (raw computation)
+fn cosine_similarity_raw(vector_a: &[f64], vector_b: &[f64]) -> Result<f64, HyperQLError> {
+    if vector_a.len() != vector_b.len() {
+        return Err(HyperQLError::ValidationError {
+            message: "Vector dimension mismatch in cosine similarity".to_string(),
+            field: Some("dimensions".to_string()),
+        });
+    }
+
+    let dot_product: f64 = vector_a.iter().zip(vector_b.iter())
+        .map(|(a, b)| a * b)
+        .sum();
+
+    let norm_a: f64 = vector_a.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let norm_b: f64 = vector_b.iter().map(|x| x * x).sum::<f64>().sqrt();
+
+    if norm_a == 0.0 || norm_b == 0.0 {
+        Ok(0.0)
+    } else {
+        Ok((dot_product / (norm_a * norm_b)).clamp(-1.0, 1.0))
+    }
 }
 
 #[cfg(test)]
@@ -236,32 +514,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_distance_functions_return_descriptive_errors() {
+    fn test_euclidean_distance() {
         let vec_a = vec![1.0, 2.0, 3.0];
-        let vec_b = vec![0.5, 1.5, 2.5];
+        let vec_b = vec![1.0, 2.0, 3.0];  // Identical vectors
         let vector_name = "test_embedding";
 
-        // Test Euclidean distance
         let result = euclidean_distance(&vec_a, &vec_b, vector_name);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Euclidean distance"));
-        assert!(error_msg.contains("test_embedding"));
-        assert!(error_msg.contains("not yet implemented"));
+        assert!(result.is_ok());
+        let distance = result.unwrap();
+        assert!((distance - 0.0).abs() < f64::EPSILON);
 
-        // Test Manhattan distance
+        // Test non-identical vectors
+        let vec_c = vec![4.0, 5.0, 6.0];
+        let result2 = euclidean_distance(&vec_a, &vec_c, vector_name);
+        assert!(result2.is_ok());
+        let distance2 = result2.unwrap();
+        assert!(distance2 > 0.0);
+    }
+
+    #[test]
+    fn test_manhattan_distance() {
+        let vec_a = vec![1.0, 2.0, 3.0];
+        let vec_b = vec![2.0, 3.0, 4.0];
+        let vector_name = "test_embedding";
+
         let result = manhattan_distance(&vec_a, &vec_b, vector_name);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Manhattan distance"));
-        assert!(error_msg.contains("test_embedding"));
+        assert!(result.is_ok());
+        let distance = result.unwrap();
+        // |1-2| + |2-3| + |3-4| = 1 + 1 + 1 = 3
+        assert!((distance - 3.0).abs() < f64::EPSILON);
+    }
 
-        // Test Cosine distance
+    #[test]
+    fn test_cosine_distance() {
+        let vec_a = vec![1.0, 2.0, 3.0];
+        let vec_b = vec![1.0, 2.0, 3.0];  // Identical vectors
+        let vector_name = "test_embedding";
+
         let result = cosine_distance(&vec_a, &vec_b, vector_name);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Cosine distance"));
-        assert!(error_msg.contains("test_embedding"));
+        assert!(result.is_ok());
+        let distance = result.unwrap();
+        // Distance should be 0 for identical vectors (1 - 1)
+        assert!((distance - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -272,11 +566,25 @@ mod tests {
         let p = 3.0;
 
         let result = minkowski_distance(&vec_a, &vec_b, p, vector_name);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Minkowski distance"));
-        assert!(error_msg.contains("p=3"));
-        assert!(error_msg.contains("test_embedding"));
+        assert!(result.is_ok());
+        let distance = result.unwrap();
+        assert!(distance > 0.0);
+
+        // Test p=1 (should match Manhattan)
+        let manhattan_result = minkowski_distance(&vec_a, &vec_b, 1.0, vector_name);
+        let manhattan_direct = manhattan_distance(&vec_a, &vec_b, vector_name);
+        assert!(manhattan_result.is_ok() && manhattan_direct.is_ok());
+        assert!((manhattan_result.unwrap() - manhattan_direct.unwrap()).abs() < f64::EPSILON);
+
+        // Test p=2 (should match Euclidean)
+        let euclidean_result = minkowski_distance(&vec_a, &vec_b, 2.0, vector_name);
+        let euclidean_direct = euclidean_distance(&vec_a, &vec_b, vector_name);
+        assert!(euclidean_result.is_ok() && euclidean_direct.is_ok());
+        assert!((euclidean_result.unwrap() - euclidean_direct.unwrap()).abs() < f64::EPSILON);
+
+        // Test invalid p
+        let invalid_result = minkowski_distance(&vec_a, &vec_b, -1.0, vector_name);
+        assert!(invalid_result.is_err());
     }
 
     #[test]
@@ -286,10 +594,15 @@ mod tests {
         let vector_name = "binary_features";
 
         let result = hamming_distance(&vec_a, &vec_b, vector_name);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Hamming distance"));
-        assert!(error_msg.contains("binary_features"));
+        assert!(result.is_ok());
+        let distance = result.unwrap();
+        // Positions 1 and 2 differ: false!=true, true!=false
+        assert_eq!(distance, 2);
+
+        // Test identical vectors
+        let result_identical = hamming_distance(&vec_a, &vec_a, vector_name);
+        assert!(result_identical.is_ok());
+        assert_eq!(result_identical.unwrap(), 0);
     }
 
     #[test]
@@ -301,11 +614,14 @@ mod tests {
         let vector_name = "sparse_keywords";
 
         let result = jaccard_distance(&indices_a, &values_a, &indices_b, &values_b, vector_name);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Jaccard distance"));
-        assert!(error_msg.contains("sparse_keywords"));
-        assert!(error_msg.contains("nnz: 3 x 4"));
+        assert!(result.is_ok());
+        let distance = result.unwrap();
+        assert!(distance >= 0.0 && distance <= 1.0);
+
+        // Test identical vectors (distance should be 0)
+        let result_identical = jaccard_distance(&indices_a, &values_a, &indices_a, &values_a, vector_name);
+        assert!(result_identical.is_ok());
+        assert!((result_identical.unwrap() - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -321,10 +637,14 @@ mod tests {
         let vector_name = "colbert_tokens";
 
         let result = colbert_distance(&tokens_a, &tokens_b, vector_name);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("ColBERT distance"));
-        assert!(error_msg.contains("colbert_tokens"));
-        assert!(error_msg.contains("tokens: 2 x 2"));
+        assert!(result.is_ok());
+        let distance = result.unwrap();
+        assert!(distance >= 0.0 && distance <= 2.0);
+
+        // Test identical tokens (distance should be 0)
+        let result_identical = colbert_distance(&tokens_a, &tokens_a, vector_name);
+        assert!(result_identical.is_ok());
+        let identical_distance = result_identical.unwrap();
+        assert!(identical_distance.abs() < f64::EPSILON);
     }
 }
