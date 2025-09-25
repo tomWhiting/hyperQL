@@ -1,11 +1,9 @@
-//! # HyperQL Query Executor
+//! # HyperQL Execution Plan Executor
 //!
-//! This module implements the comprehensive query execution engine for HyperQL.
-//! The executor takes optimized execution plans from the compiler and executes them
-//! against data sources, supporting SELECT, INSERT, UPDATE, DELETE operations with
-//! aggregations, GROUP BY, HAVING clauses, and hyperbolic space operations.
-
-pub mod operators;
+//! This module implements the execution plan handling for HyperQL.
+//! Note: In the refactored architecture, this executor should primarily return execution
+//! plans to Hyperspatial rather than performing actual computations. The current
+//! implementation maintains backward compatibility while the transition is completed.
 
 use crate::compiler::{CompiledQuery, ExecutionPlan, CompiledExpression, CompiledProjection, CompiledSortKey, CompiledAssignment, CompiledTraversePattern};
 use crate::types::{QueryResult, ResultRow, ExecutionStats, Value, Entity};
@@ -148,6 +146,21 @@ impl Executor {
             }
             ExecutionPlan::Traverse { patterns } => {
                 self.execute_traverse(patterns)
+            }
+            ExecutionPlan::GeometricOperation { op_type, params, input } => {
+                self.execute_geometric_operation(op_type, params, input.as_ref().map(|v| &**v))
+            }
+            ExecutionPlan::VectorOperation { op_type, params, input } => {
+                self.execute_vector_operation(op_type, params, input.as_ref().map(|v| &**v))
+            }
+            ExecutionPlan::StreamOperation { op_type, params, input } => {
+                self.execute_stream_operation(op_type, params, input.as_ref().map(|v| &**v))
+            }
+            ExecutionPlan::TimeSeriesOperation { op_type, params, input } => {
+                self.execute_timeseries_operation(op_type, params, input.as_ref().map(|v| &**v))
+            }
+            ExecutionPlan::GraphOperation { op_type, params, input } => {
+                self.execute_graph_operation(op_type, params, input.as_ref().map(|v| &**v))
             }
         }
     }
@@ -890,6 +903,66 @@ impl Executor {
             // Default: consider different types as equal for now
             _ => Ordering::Equal,
         }
+    }
+
+    /// Execute geometric operation - return plan information instead of actual execution
+    fn execute_geometric_operation(&mut self, op_type: &crate::compiler::GeometricOpType, params: &HashMap<String, CompiledExpression>, input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
+        let mut result_columns = HashMap::new();
+        result_columns.insert("operation".to_string(), Value::String("GEOMETRIC_OPERATION".to_string()));
+        result_columns.insert("op_type".to_string(), Value::String(format!("{:?}", op_type)));
+        result_columns.insert("param_count".to_string(), Value::Int(params.len() as i64));
+        result_columns.insert("has_input".to_string(), Value::Bool(input.is_some()));
+        result_columns.insert("message".to_string(), Value::String("Geometric operations should be executed by Hyperspatial engine".to_string()));
+
+        Ok(vec![ResultRow { columns: result_columns }])
+    }
+
+    /// Execute vector operation - return plan information instead of actual execution
+    fn execute_vector_operation(&mut self, op_type: &crate::compiler::VectorOpType, params: &HashMap<String, CompiledExpression>, input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
+        let mut result_columns = HashMap::new();
+        result_columns.insert("operation".to_string(), Value::String("VECTOR_OPERATION".to_string()));
+        result_columns.insert("op_type".to_string(), Value::String(format!("{:?}", op_type)));
+        result_columns.insert("param_count".to_string(), Value::Int(params.len() as i64));
+        result_columns.insert("has_input".to_string(), Value::Bool(input.is_some()));
+        result_columns.insert("message".to_string(), Value::String("Vector operations should be executed by Hyperspatial engine".to_string()));
+
+        Ok(vec![ResultRow { columns: result_columns }])
+    }
+
+    /// Execute stream operation - return plan information instead of actual execution
+    fn execute_stream_operation(&mut self, op_type: &crate::compiler::StreamOpType, params: &HashMap<String, CompiledExpression>, input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
+        let mut result_columns = HashMap::new();
+        result_columns.insert("operation".to_string(), Value::String("STREAM_OPERATION".to_string()));
+        result_columns.insert("op_type".to_string(), Value::String(format!("{:?}", op_type)));
+        result_columns.insert("param_count".to_string(), Value::Int(params.len() as i64));
+        result_columns.insert("has_input".to_string(), Value::Bool(input.is_some()));
+        result_columns.insert("message".to_string(), Value::String("Stream operations should be executed by Hyperspatial engine".to_string()));
+
+        Ok(vec![ResultRow { columns: result_columns }])
+    }
+
+    /// Execute time series operation - return plan information instead of actual execution
+    fn execute_timeseries_operation(&mut self, op_type: &crate::compiler::TimeSeriesOpType, params: &HashMap<String, CompiledExpression>, input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
+        let mut result_columns = HashMap::new();
+        result_columns.insert("operation".to_string(), Value::String("TIMESERIES_OPERATION".to_string()));
+        result_columns.insert("op_type".to_string(), Value::String(format!("{:?}", op_type)));
+        result_columns.insert("param_count".to_string(), Value::Int(params.len() as i64));
+        result_columns.insert("has_input".to_string(), Value::Bool(input.is_some()));
+        result_columns.insert("message".to_string(), Value::String("Time series operations should be executed by Hyperspatial engine".to_string()));
+
+        Ok(vec![ResultRow { columns: result_columns }])
+    }
+
+    /// Execute graph operation - return plan information instead of actual execution
+    fn execute_graph_operation(&mut self, op_type: &crate::compiler::GraphOpType, params: &HashMap<String, CompiledExpression>, input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
+        let mut result_columns = HashMap::new();
+        result_columns.insert("operation".to_string(), Value::String("GRAPH_OPERATION".to_string()));
+        result_columns.insert("op_type".to_string(), Value::String(format!("{:?}", op_type)));
+        result_columns.insert("param_count".to_string(), Value::Int(params.len() as i64));
+        result_columns.insert("has_input".to_string(), Value::Bool(input.is_some()));
+        result_columns.insert("message".to_string(), Value::String("Graph operations should be executed by Hyperspatial engine".to_string()));
+
+        Ok(vec![ResultRow { columns: result_columns }])
     }
 }
 

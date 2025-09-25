@@ -64,9 +64,8 @@
 //!
 //! - [`ast`]: Abstract syntax tree definitions for all query constructs
 //! - [`parser`]: Winnow-based parser for HyperQL syntax
-//! - [`compiler`]: Compilation from AST to execution plans
-//! - [`executor`]: Query execution engine with hyperbolic optimizations
-//! - [`functions`]: Built-in functions for vector, geometric, and aggregate operations
+//! - [`compiler`]: Compilation from AST to execution plans for Hyperspatial
+//! - [`executor`]: Plan executor (returns execution plans rather than executing them)
 //! - [`cascade`]: Cascade system for measure propagation across hierarchies
 //! - [`optimizer`]: Query optimization for hyperbolic space operations
 //! - [`context`]: Query execution context and variable binding management
@@ -92,7 +91,6 @@ pub mod ast;
 pub mod parser;
 pub mod compiler;
 pub mod executor;
-pub mod functions;
 pub mod cascade;
 pub mod optimizer;
 pub mod context;
@@ -227,106 +225,70 @@ mod integration_tests {
     }
 
     #[test]
-    fn test_stream_and_timeseries_functionality() {
-        use crate::functions::streams::operations::{stream_create, stream_produce, stream_consume};
-        use crate::functions::streams::windowing::{window_tumbling};
-        use crate::functions::timeseries::temporal::{time_bucket, time_diff, extract};
-        use crate::functions::timeseries::window::{moving_average, exponential_smoothing, lag};
+    fn test_query_plan_generation() {
         use std::collections::HashMap;
-        use chrono::Utc;
 
-        println!("Testing stream and time series functionality...");
+        println!("Testing query plan generation...");
 
-        // Test 1: Stream Operations
-        println!("\n1. Testing Stream Operations");
+        // Create test data
+        let mut data_source = MemoryDataSource::new();
 
-        // Create a stream
-        let mut stream_config = HashMap::new();
-        stream_config.insert("buffer_size".to_string(), Value::Int(100));
-        stream_config.insert("max_events".to_string(), Value::Int(50));
+        // Add Alice
+        let mut alice = Entity {
+            id: EntityId("alice_001".to_string()),
+            properties: HashMap::new(),
+            position: Some(Position3D { x: 1.0, y: 2.0, z: 3.0 }),
+            embedding: None,
+        };
+        alice.properties.insert(PropertyName("name".to_string()), Value::String("Alice".to_string()));
+        alice.properties.insert(PropertyName("age".to_string()), Value::Int(30));
 
-        let create_result = stream_create("test_stream".to_string(), stream_config);
-        assert!(create_result.is_ok());
-        println!("✓ Stream created successfully");
+        data_source.add_entity("entities", alice);
 
-        // Produce events to stream
-        for i in 1..=10 {
-            let mut event_data = HashMap::new();
-            event_data.insert("value".to_string(), Value::Int(i * 10));
-            event_data.insert("timestamp".to_string(), Value::Timestamp(Utc::now().timestamp_millis()));
+        // Create executor
+        let mut executor = Executor::new(Box::new(data_source));
+        let compiler = Compiler::new();
 
-            let produce_result = stream_produce("test_stream".to_string(), event_data);
-            assert!(produce_result.is_ok());
-        }
-        println!("✓ Produced 10 events to stream");
+        // Test: Simple SELECT query generates plan
+        println!("\nTesting: SELECT * FROM entities");
+        let query = "SELECT * FROM entities";
+        let statement = parse_statement(query).expect("Query should parse");
+        let compiled = compiler.compile(statement).expect("Query should compile");
 
-        // Consume events from stream
-        let mut consume_config = HashMap::new();
-        consume_config.insert("limit".to_string(), Value::Int(5));
-
-        let consume_result = stream_consume("test_stream".to_string(), consume_config);
-        assert!(consume_result.is_ok());
-        if let Value::List(events) = consume_result.unwrap() {
-            assert_eq!(events.len(), 5);
-            println!("✓ Consumed {} events from stream", events.len());
-        }
-
-        // Test 2: Window Functions
-        println!("\n2. Testing Stream Window Functions");
-
-        let window_result = window_tumbling("test_stream".to_string(), 1000, "count".to_string());
-        assert!(window_result.is_ok());
-        println!("✓ Tumbling window function executed");
-
-        // Test 3: Time Series Temporal Functions
-        println!("\n3. Testing Time Series Temporal Functions");
-
-        let now = Utc::now().timestamp_millis();
-
-        // Test time_bucket
-        let bucket_result = time_bucket(now, 1, "hour");
-        assert!(bucket_result.is_ok());
-        println!("✓ Time bucket function executed");
-
-        // Test time_diff
-        let diff_result = time_diff(now, now + 3600000, Some("hours"));
-        assert!(diff_result.is_ok());
-        if let Value::Int(hours) = diff_result.unwrap() {
-            assert_eq!(hours, 1);
-            println!("✓ Time difference calculated: {} hours", hours);
+        // Verify we have an execution plan
+        match &compiled.plan {
+            crate::compiler::ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    crate::compiler::ExecutionPlan::Scan { .. } => {
+                        println!("✓ Generated execution plan with Scan -> Project structure");
+                    }
+                    _ => panic!("Expected Scan as input to Project"),
+                }
+            }
+            _ => panic!("Expected Project plan"),
         }
 
-        // Test extract
-        let extract_result = extract(now, "year");
-        assert!(extract_result.is_ok());
-        println!("✓ Timestamp component extracted");
+        // Test: Execute plan returns query results (for now, still executes)
+        let result = executor.execute(compiled).expect("Plan should execute");
+        assert_eq!(result.rows.len(), 1);
+        println!("✓ Plan execution returned {} rows", result.rows.len());
 
-        // Test 4: Time Series Window Functions
-        println!("\n4. Testing Time Series Window Functions");
+        // Test: Query metadata generation
+        println!("\nTesting: Query metadata generation");
+        let query2 = "SELECT name, age FROM entities WHERE age > 25";
+        let statement2 = parse_statement(query2).expect("Query should parse");
+        let compiled2 = compiler.compile(statement2).expect("Query should compile");
 
-        let test_values = vec![
-            Value::Int(10), Value::Int(20), Value::Int(30),
-            Value::Int(40), Value::Int(50)
-        ];
+        // Verify metadata includes accessed tables/columns
+        assert!(compiled2.metadata.tables_accessed.contains(&"entities".to_string()));
+        println!("✓ Metadata captured accessed tables: {:?}", compiled2.metadata.tables_accessed);
 
-        // Test moving_average
-        let ma_result = moving_average(test_values.clone(), 3);
-        assert!(ma_result.is_ok());
-        println!("✓ Moving average calculated");
+        // Verify cost estimation
+        assert!(compiled2.estimated_cost.estimated_rows > 0);
+        assert!(compiled2.estimated_cost.estimated_cpu_cost > 0.0);
+        println!("✓ Cost estimation generated: {} estimated rows, {:.2} CPU cost",
+                compiled2.estimated_cost.estimated_rows, compiled2.estimated_cost.estimated_cpu_cost);
 
-        // Test exponential_smoothing
-        let es_result = exponential_smoothing(test_values.clone(), 0.3);
-        assert!(es_result.is_ok());
-        println!("✓ Exponential smoothing calculated");
-
-        // Test lag
-        let lag_result = lag(test_values.clone(), 1, Some(Value::Int(0)));
-        assert!(lag_result.is_ok());
-        if let Value::List(lag_values) = lag_result.unwrap() {
-            assert_eq!(lag_values.len(), 5);
-            println!("✓ Lag function calculated for {} values", lag_values.len());
-        }
-
-        println!("\n🎉 All stream and time series tests passed! Real-time data processing functionality is working.");
+        println!("\n🎉 All query plan generation tests passed! HyperQL is now a pure query language.");
     }
 }

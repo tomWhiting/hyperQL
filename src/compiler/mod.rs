@@ -9,6 +9,93 @@ use crate::error::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Geometric operation types - plans for Hyperspatial to execute
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GeometricOpType {
+    /// Hyperbolic distance calculation
+    HyperbolicDistance,
+    /// Geodesic distance calculation
+    GeodesicDistance,
+    /// Within radius check
+    WithinRadius,
+    /// Near positions query
+    NearPositions,
+    /// Containment testing
+    Contains,
+    /// Intersection operations
+    Intersects,
+}
+
+/// Vector operation types - plans for Hyperspatial to execute
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum VectorOpType {
+    /// Cosine similarity calculation
+    CosineSimilarity,
+    /// Euclidean distance calculation
+    EuclideanDistance,
+    /// Dot product calculation
+    DotProduct,
+    /// Vector normalization
+    Normalize,
+    /// K-nearest neighbors query
+    KNN,
+    /// Vector similarity search
+    SimilaritySearch,
+}
+
+/// Stream operation types - plans for Hyperspatial to execute
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StreamOpType {
+    /// Create stream
+    CreateStream,
+    /// Produce to stream
+    ProduceStream,
+    /// Consume from stream
+    ConsumeStream,
+    /// Tumbling window
+    TumblingWindow,
+    /// Sliding window
+    SlidingWindow,
+    /// Stream join
+    StreamJoin,
+}
+
+/// Time series operation types - plans for Hyperspatial to execute
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TimeSeriesOpType {
+    /// Time bucket aggregation
+    TimeBucket,
+    /// Time difference calculation
+    TimeDiff,
+    /// Extract time component
+    ExtractTime,
+    /// Moving average
+    MovingAverage,
+    /// Exponential smoothing
+    ExponentialSmoothing,
+    /// Lag function
+    Lag,
+    /// Lead function
+    Lead,
+}
+
+/// Graph operation types - plans for Hyperspatial to execute
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GraphOpType {
+    /// Shortest path calculation
+    ShortestPath,
+    /// Page rank calculation
+    PageRank,
+    /// Community detection
+    CommunityDetection,
+    /// Graph traversal
+    GraphTraversal,
+    /// Connected components
+    ConnectedComponents,
+    /// Centrality measures
+    Centrality,
+}
+
 /// Main compiler interface
 pub struct Compiler {
     /// Type checker for semantic validation
@@ -28,7 +115,7 @@ pub struct CompiledQuery {
     pub estimated_cost: ExecutionCost,
 }
 
-/// Execution plan structure
+/// Execution plan structure - represents operations to be executed by Hyperspatial
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExecutionPlan {
     /// Sequential scan of entities
@@ -89,6 +176,36 @@ pub enum ExecutionPlan {
     /// TRAVERSE operation for graph pattern matching
     Traverse {
         patterns: Vec<CompiledTraversePattern>,
+    },
+    /// Geometric operation plan
+    GeometricOperation {
+        op_type: GeometricOpType,
+        params: std::collections::HashMap<String, CompiledExpression>,
+        input: Option<Box<ExecutionPlan>>,
+    },
+    /// Vector operation plan
+    VectorOperation {
+        op_type: VectorOpType,
+        params: std::collections::HashMap<String, CompiledExpression>,
+        input: Option<Box<ExecutionPlan>>,
+    },
+    /// Stream operation plan
+    StreamOperation {
+        op_type: StreamOpType,
+        params: std::collections::HashMap<String, CompiledExpression>,
+        input: Option<Box<ExecutionPlan>>,
+    },
+    /// Time series operation plan
+    TimeSeriesOperation {
+        op_type: TimeSeriesOpType,
+        params: std::collections::HashMap<String, CompiledExpression>,
+        input: Option<Box<ExecutionPlan>>,
+    },
+    /// Graph operation plan
+    GraphOperation {
+        op_type: GraphOpType,
+        params: std::collections::HashMap<String, CompiledExpression>,
+        input: Option<Box<ExecutionPlan>>,
     },
 }
 
@@ -709,6 +826,48 @@ impl Compiler {
                     }
                 }
             }
+            ExecutionPlan::GeometricOperation { op_type, params, input } => {
+                metadata.requires_spatial_index = true;
+                for (_key, expr) in params {
+                    self.collect_expression_metadata(expr, metadata);
+                }
+                if let Some(input_plan) = input {
+                    self.collect_metadata(input_plan, metadata);
+                }
+            }
+            ExecutionPlan::VectorOperation { op_type, params, input } => {
+                metadata.requires_vector_index = true;
+                for (_key, expr) in params {
+                    self.collect_expression_metadata(expr, metadata);
+                }
+                if let Some(input_plan) = input {
+                    self.collect_metadata(input_plan, metadata);
+                }
+            }
+            ExecutionPlan::StreamOperation { op_type, params, input } => {
+                for (_key, expr) in params {
+                    self.collect_expression_metadata(expr, metadata);
+                }
+                if let Some(input_plan) = input {
+                    self.collect_metadata(input_plan, metadata);
+                }
+            }
+            ExecutionPlan::TimeSeriesOperation { op_type, params, input } => {
+                for (_key, expr) in params {
+                    self.collect_expression_metadata(expr, metadata);
+                }
+                if let Some(input_plan) = input {
+                    self.collect_metadata(input_plan, metadata);
+                }
+            }
+            ExecutionPlan::GraphOperation { op_type, params, input } => {
+                for (_key, expr) in params {
+                    self.collect_expression_metadata(expr, metadata);
+                }
+                if let Some(input_plan) = input {
+                    self.collect_metadata(input_plan, metadata);
+                }
+            }
         }
     }
 
@@ -801,20 +960,12 @@ impl TypeChecker {
                 })
             }
             Expression::Geometric(geom_expr) => {
-                // TODO: Implement geometric expression compilation
-                Err(HyperQLError::ExecutionError {
-                    message: format!("Geometric expression compilation not yet implemented: {:?}", geom_expr),
-                    operation: "compile_geometric_expression".to_string(),
-                    entity_context: Some("geometric_compilation".to_string()),
-                })
+                // Compile geometric expressions into plan generation
+                self.compile_geometric_expression(geom_expr)
             }
             Expression::Vector(vector_expr) => {
-                // TODO: Implement vector expression compilation
-                Err(HyperQLError::ExecutionError {
-                    message: format!("Vector expression compilation not yet implemented: {:?}", vector_expr),
-                    operation: "compile_vector_expression".to_string(),
-                    entity_context: Some("vector_compilation".to_string()),
-                })
+                // Compile vector expressions into plan generation
+                self.compile_vector_expression(vector_expr)
             }
         }
     }
@@ -888,7 +1039,91 @@ impl TypeChecker {
             // Date/Time functions
             "NOW" | "CURRENT_TIMESTAMP" => Ok(ValueType::Timestamp),
 
+            // Geometric functions - all return specific types for plan generation
+            "HYPERBOLIC_DISTANCE" | "GEODESIC_DISTANCE" => Ok(ValueType::Distance),
+            "WITHIN_RADIUS" | "CONTAINS" | "INTERSECTS" => Ok(ValueType::Bool),
+
+            // Vector functions - all return specific types for plan generation
+            "COSINE_SIMILARITY" | "DOT_PRODUCT" => Ok(ValueType::Float),
+            "EUCLIDEAN_DISTANCE" => Ok(ValueType::Distance),
+            "NORMALIZE" => Ok(ValueType::Vector),
+            "KNN" | "SIMILARITY_SEARCH" => Ok(ValueType::List(Box::new(ValueType::EntityId))),
+
             _ => Ok(ValueType::String), // Default for unknown functions
+        }
+    }
+
+    /// Compile geometric expressions into function calls that generate plans
+    fn compile_geometric_expression(&self, geom_expr: crate::ast::geometric::GeometricExpression) -> Result<CompiledExpression> {
+        match geom_expr {
+            crate::ast::geometric::GeometricExpression::Within { target, radius, reference } => {
+                let compiled_target = self.compile_expression(*target)?;
+                let compiled_reference = self.compile_expression(*reference)?;
+                let compiled_radius = CompiledExpression::Literal(Value::Float(radius));
+
+                Ok(CompiledExpression::Function {
+                    name: "WITHIN_RADIUS".to_string(),
+                    args: vec![compiled_target, compiled_reference, compiled_radius],
+                    result_type: ValueType::Bool,
+                })
+            }
+            crate::ast::geometric::GeometricExpression::Near { target, reference, max_distance } => {
+                let compiled_target = self.compile_expression(*target)?;
+                let compiled_reference = self.compile_expression(*reference)?;
+                let compiled_max_distance = CompiledExpression::Literal(Value::Float(max_distance));
+
+                Ok(CompiledExpression::Function {
+                    name: "HYPERBOLIC_DISTANCE".to_string(),
+                    args: vec![compiled_target, compiled_reference, compiled_max_distance],
+                    result_type: ValueType::Distance,
+                })
+            }
+            crate::ast::geometric::GeometricExpression::InRadius { target, center, radius } => {
+                let compiled_target = self.compile_expression(*target)?;
+                let compiled_center = self.compile_expression(*center)?;
+                let compiled_radius = CompiledExpression::Literal(Value::Float(radius));
+
+                Ok(CompiledExpression::Function {
+                    name: "WITHIN_RADIUS".to_string(),
+                    args: vec![compiled_target, compiled_center, compiled_radius],
+                    result_type: ValueType::Bool,
+                })
+            }
+        }
+    }
+
+    /// Compile vector expressions into function calls that generate plans
+    fn compile_vector_expression(&self, vector_expr: VectorExpression) -> Result<CompiledExpression> {
+        match vector_expr {
+            VectorExpression::Similarity { vector_name, reference, metric, threshold, vector_type } => {
+                let compiled_vector_name = CompiledExpression::Literal(Value::String(vector_name));
+                let compiled_reference = self.compile_expression(*reference)?;
+                let compiled_metric = CompiledExpression::Literal(Value::String(format!("{:?}", metric)));
+                let compiled_threshold = match threshold {
+                    Some(t) => CompiledExpression::Literal(Value::Float(t)),
+                    None => CompiledExpression::Literal(Value::Null),
+                };
+                let compiled_vector_type = CompiledExpression::Literal(Value::String(format!("{:?}", vector_type)));
+
+                Ok(CompiledExpression::Function {
+                    name: "COSINE_SIMILARITY".to_string(),
+                    args: vec![compiled_vector_name, compiled_reference, compiled_metric, compiled_threshold, compiled_vector_type],
+                    result_type: ValueType::Float,
+                })
+            }
+            VectorExpression::KNN { vector_name, reference, k, metric, vector_type } => {
+                let compiled_vector_name = CompiledExpression::Literal(Value::String(vector_name));
+                let compiled_reference = self.compile_expression(*reference)?;
+                let compiled_k = CompiledExpression::Literal(Value::Int(k as i64));
+                let compiled_metric = CompiledExpression::Literal(Value::String(format!("{:?}", metric)));
+                let compiled_vector_type = CompiledExpression::Literal(Value::String(format!("{:?}", vector_type)));
+
+                Ok(CompiledExpression::Function {
+                    name: "KNN".to_string(),
+                    args: vec![compiled_vector_name, compiled_reference, compiled_k, compiled_metric, compiled_vector_type],
+                    result_type: ValueType::List(Box::new(ValueType::EntityId)),
+                })
+            }
         }
     }
 }
@@ -1002,6 +1237,101 @@ impl CostEstimator {
                     estimated_cpu_cost: estimated_traversal_cost,
                     estimated_memory_mb: pattern_count * 20.0, // Memory for graph traversal
                     estimated_io_ops: (pattern_count * 100.0) as u64, // Graph I/O operations
+                }
+            }
+            ExecutionPlan::GeometricOperation { params, input, .. } => {
+                let base_cost = ExecutionCost {
+                    estimated_rows: 1000,
+                    estimated_cpu_cost: 5.0, // Geometric operations are expensive
+                    estimated_memory_mb: 10.0,
+                    estimated_io_ops: 50,
+                };
+                if let Some(input_plan) = input {
+                    let input_cost = self.estimate_cost(input_plan);
+                    ExecutionCost {
+                        estimated_rows: input_cost.estimated_rows,
+                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
+                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
+                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
+                    }
+                } else {
+                    base_cost
+                }
+            }
+            ExecutionPlan::VectorOperation { params, input, .. } => {
+                let base_cost = ExecutionCost {
+                    estimated_rows: 1000,
+                    estimated_cpu_cost: 8.0, // Vector operations can be very expensive
+                    estimated_memory_mb: 20.0, // Vector operations use more memory
+                    estimated_io_ops: 100,
+                };
+                if let Some(input_plan) = input {
+                    let input_cost = self.estimate_cost(input_plan);
+                    ExecutionCost {
+                        estimated_rows: input_cost.estimated_rows,
+                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
+                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
+                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
+                    }
+                } else {
+                    base_cost
+                }
+            }
+            ExecutionPlan::StreamOperation { params, input, .. } => {
+                let base_cost = ExecutionCost {
+                    estimated_rows: 5000, // Streams typically produce many events
+                    estimated_cpu_cost: 3.0,
+                    estimated_memory_mb: 50.0, // Stream buffering
+                    estimated_io_ops: 200,
+                };
+                if let Some(input_plan) = input {
+                    let input_cost = self.estimate_cost(input_plan);
+                    ExecutionCost {
+                        estimated_rows: input_cost.estimated_rows + base_cost.estimated_rows,
+                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
+                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
+                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
+                    }
+                } else {
+                    base_cost
+                }
+            }
+            ExecutionPlan::TimeSeriesOperation { params, input, .. } => {
+                let base_cost = ExecutionCost {
+                    estimated_rows: 2000, // Time series typically have many data points
+                    estimated_cpu_cost: 4.0,
+                    estimated_memory_mb: 15.0,
+                    estimated_io_ops: 75,
+                };
+                if let Some(input_plan) = input {
+                    let input_cost = self.estimate_cost(input_plan);
+                    ExecutionCost {
+                        estimated_rows: input_cost.estimated_rows,
+                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
+                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
+                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
+                    }
+                } else {
+                    base_cost
+                }
+            }
+            ExecutionPlan::GraphOperation { params, input, .. } => {
+                let base_cost = ExecutionCost {
+                    estimated_rows: 1000,
+                    estimated_cpu_cost: 15.0, // Graph algorithms are very expensive
+                    estimated_memory_mb: 100.0, // Graph algorithms use significant memory
+                    estimated_io_ops: 500,
+                };
+                if let Some(input_plan) = input {
+                    let input_cost = self.estimate_cost(input_plan);
+                    ExecutionCost {
+                        estimated_rows: input_cost.estimated_rows,
+                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
+                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
+                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
+                    }
+                } else {
+                    base_cost
                 }
             }
         }
