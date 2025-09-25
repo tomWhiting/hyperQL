@@ -86,6 +86,7 @@
 pub mod error;
 pub mod error_context;
 pub mod types;
+pub mod type_checker;
 
 // Query language modules
 pub mod ast;
@@ -109,6 +110,7 @@ pub use ast::{Statement, SelectStatement, Expression};
 pub use parser::parse_statement;
 pub use compiler::{Compiler, CompiledQuery};
 pub use executor::{Executor, MemoryDataSource};
+pub use type_checker::{TypeChecker, TypeInfo, TypeContext};
 
 #[cfg(test)]
 mod integration_tests {
@@ -226,6 +228,62 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_type_checker_integration() {
+        use std::collections::HashMap;
+        use crate::type_checker::TypeChecker;
+        use crate::ast::{Literal, BinaryOperator, ColumnRef};
+
+        println!("Testing type checker integration...");
+
+        let mut type_checker = TypeChecker::new();
+
+        // Test basic expression type checking
+        let expr = Expression::Binary {
+            left: Box::new(Expression::Literal(Literal::Int(42))),
+            op: BinaryOperator::Add,
+            right: Box::new(Expression::Literal(Literal::Float(3.14))),
+        };
+
+        let result_type = type_checker.check_expression_type(&expr).expect("Should type check successfully");
+        assert_eq!(result_type, TypeInfo::Float, "Int + Float should result in Float");
+        println!("✓ Basic arithmetic type promotion works");
+
+        // Test type compatibility validation
+        let left = Expression::Literal(Literal::String("hello".to_string()));
+        let right = Expression::Literal(Literal::Int(42));
+
+        let result = type_checker.check_operation_compatibility(
+            &left, &BinaryOperator::Add, &right
+        );
+        assert!(result.is_err(), "String + Int should be a type error");
+        println!("✓ Type incompatibility detection works");
+
+        // Test function type checking
+        let sum_result = type_checker.check_function_type(
+            "SUM",
+            &[Expression::Literal(Literal::Int(100))]
+        ).expect("SUM should work on integers");
+        assert_eq!(sum_result, TypeInfo::Integer);
+        println!("✓ Function type checking works");
+
+        // Test WHERE clause validation
+        let where_expr = Expression::Binary {
+            left: Box::new(Expression::Column(ColumnRef {
+                table: None,
+                name: "age".to_string(),
+            })),
+            op: BinaryOperator::GreaterThan,
+            right: Box::new(Expression::Literal(Literal::Int(21))),
+        };
+
+        let result = type_checker.check_where_clause(&where_expr);
+        assert!(result.is_ok(), "Valid WHERE clause should pass");
+        println!("✓ WHERE clause validation works");
+
+        println!("\n🎉 Type checker integration tests passed!");
+    }
+
+    #[test]
     fn test_query_plan_generation() {
         use std::collections::HashMap;
 
@@ -291,5 +349,81 @@ mod integration_tests {
                 compiled2.estimated_cost.estimated_rows, compiled2.estimated_cost.estimated_cpu_cost);
 
         println!("\n🎉 All query plan generation tests passed! HyperQL is now a pure query language.");
+    }
+
+    #[test]
+    fn test_comprehensive_type_validation() {
+        use crate::ast::{Literal, BinaryOperator, ColumnRef, VectorExpression};
+
+        println!("Testing comprehensive type validation across HyperQL features...");
+
+        let mut type_checker = TypeChecker::new();
+
+        // Test geometric expression type checking
+        let geo_expr = Expression::Geometric(crate::ast::geometric::GeometricExpression::Within {
+            target: Box::new(Expression::Column(ColumnRef {
+                table: None,
+                name: "position".to_string(),
+            })),
+            radius: 5.0,
+            reference: Box::new(Expression::Column(ColumnRef {
+                table: None,
+                name: "position".to_string(),
+            })),
+        });
+
+        let geo_type = type_checker.check_expression_type(&geo_expr)
+            .expect("Geometric expression should type check");
+        assert_eq!(geo_type, TypeInfo::Bool, "WITHIN should return boolean");
+        println!("✓ Geometric expression type checking works");
+
+        // Test vector expression type checking
+        let vector_expr = Expression::Vector(VectorExpression::Similarity {
+            vector_name: "embeddings".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            metric: crate::ast::vector::similarity::SimilarityMetric::Cosine,
+            threshold: Some(0.8),
+            vector_type: crate::ast::vector::similarity::VectorType::Dense { dimensions: 768 },
+        });
+
+        let vector_type = type_checker.check_expression_type(&vector_expr)
+            .expect("Vector expression should type check");
+        assert_eq!(vector_type, TypeInfo::Float, "Vector similarity should return float");
+        println!("✓ Vector expression type checking works");
+
+        // Test complex nested expression
+        let complex_expr = Expression::Binary {
+            left: Box::new(Expression::Function {
+                name: "AVG".to_string(),
+                args: vec![Expression::Literal(Literal::Float(85.5))],
+            }),
+            op: BinaryOperator::GreaterThan,
+            right: Box::new(Expression::Binary {
+                left: Box::new(Expression::Literal(Literal::Int(50))),
+                op: BinaryOperator::Add,
+                right: Box::new(Expression::Literal(Literal::Float(25.0))),
+            }),
+        };
+
+        let complex_type = type_checker.check_expression_type(&complex_expr)
+            .expect("Complex expression should type check");
+        assert_eq!(complex_type, TypeInfo::Bool, "Comparison should return boolean");
+        println!("✓ Complex nested expression type checking works");
+
+        // Test UPDATE assignment validation
+        let update_result = type_checker.check_update_assignment(
+            "name",
+            &Expression::Literal(Literal::String("John Doe".to_string()))
+        );
+        assert!(update_result.is_ok(), "Valid UPDATE assignment should pass");
+
+        let invalid_update = type_checker.check_update_assignment(
+            "position",
+            &Expression::Literal(Literal::String("not a point".to_string()))
+        );
+        assert!(invalid_update.is_err(), "Invalid UPDATE assignment should fail");
+        println!("✓ UPDATE assignment validation works");
+
+        println!("\n🎉 Comprehensive type validation tests passed!");
     }
 }
