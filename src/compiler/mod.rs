@@ -1,13 +1,18 @@
-//! # HyperQL Query Compiler
-//!
-//! This module implements the comprehensive query compilation engine that transforms HyperQL
-//! Abstract Syntax Trees (ASTs) into optimized execution plans. Supports SELECT, INSERT,
-//! UPDATE, DELETE statements with aggregate functions, GROUP BY, HAVING clauses.
-
 use crate::ast::*;
 use crate::error::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+mod expression;
+mod select;
+mod statement;
+mod traverse;
+mod metadata;
+
+use select::SelectCompiler;
+use statement::StatementCompiler;
+use metadata::{MetadataGenerator, CostEstimator};
+
+pub use metadata::{QueryMetadata, ExecutionCost};
 
 /// Geometric operation types - plans for Hyperspatial to execute
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,12 +101,11 @@ pub enum GraphOpType {
     Centrality,
 }
 
-/// Main compiler interface
 pub struct Compiler {
-    /// Type checker for semantic validation
-    type_checker: TypeChecker,
-    /// Plan generator
-    plan_generator: PlanGenerator,
+    select_compiler: SelectCompiler,
+    statement_compiler: StatementCompiler,
+    metadata_generator: MetadataGenerator,
+    cost_estimator: CostEstimator,
 }
 
 /// Compiled query plan
@@ -308,1049 +312,111 @@ pub enum ValueType {
     Duration,
 }
 
-/// Query metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueryMetadata {
-    pub tables_accessed: Vec<String>,
-    pub columns_accessed: Vec<String>,
-    pub functions_used: Vec<String>,
-    pub requires_spatial_index: bool,
-    pub requires_vector_index: bool,
-}
 
-/// Execution cost estimate
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionCost {
-    pub estimated_rows: u64,
-    pub estimated_cpu_cost: f64,
-    pub estimated_memory_mb: f64,
-    pub estimated_io_ops: u64,
-}
-
-/// Type checker for semantic analysis
-pub struct TypeChecker {
-    /// Known entity schemas
-    schemas: HashMap<String, EntitySchema>,
-}
-
-/// Entity schema definition
-#[derive(Debug, Clone)]
-pub struct EntitySchema {
-    pub name: String,
-    pub properties: HashMap<String, ValueType>,
-}
-
-/// Plan generator
-pub struct PlanGenerator {
-    /// Cost estimator
-    cost_estimator: CostEstimator,
-}
-
-/// Cost estimation component
-pub struct CostEstimator;
 
 impl Compiler {
-    /// Create a new compiler
     pub fn new() -> Self {
         Self {
-            type_checker: TypeChecker::new(),
-            plan_generator: PlanGenerator::new(),
+            select_compiler: SelectCompiler::new(),
+            statement_compiler: StatementCompiler::new(),
+            metadata_generator: MetadataGenerator::new(),
+            cost_estimator: CostEstimator::new(),
         }
     }
 
-    /// Compile a statement into an execution plan
     pub fn compile(&self, statement: Statement) -> Result<CompiledQuery> {
-        match statement {
-            Statement::Select(select) => self.compile_select(select),
-            Statement::Insert(insert) => self.compile_insert(insert),
-            Statement::Update(update) => self.compile_update(update),
-            Statement::Delete(delete) => self.compile_delete(delete),
-        }
-    }
-
-    /// Compile a SELECT statement
-    fn compile_select(&self, select: SelectStatement) -> Result<CompiledQuery> {
-        // Start with base table scan
-        let mut plan = self.create_base_scan(&select)?;
-
-        // Apply TRAVERSE clause if present
-        if let Some(traverse_clause) = select.traverse_clause {
-            let compiled_patterns = self.compile_traverse_patterns(&traverse_clause.patterns)?;
-            let traverse_plan = ExecutionPlan::Traverse {
-                patterns: compiled_patterns,
-            };
-            // If we have a base scan, chain the traverse after it
-            if let ExecutionPlan::Scan { .. } = plan {
-                // For now, replace the scan with traverse
-                // TODO: Properly chain scan -> traverse in execution flow
-                plan = traverse_plan;
-            } else {
-                plan = traverse_plan;
-            }
-        }
-
-        // Apply WHERE clause if present
-        if let Some(where_expr) = select.where_clause {
-            let compiled_predicate = self.type_checker.compile_expression(where_expr)?;
-            plan = ExecutionPlan::Filter {
-                input: Box::new(plan),
-                predicate: compiled_predicate,
-            };
-        }
-
-        // Apply GROUP BY if present
-        if !select.group_by.is_empty() {
-            let group_expressions = select.group_by.iter()
-                .map(|expr| self.type_checker.compile_expression(expr.clone()))
-                .collect::<Result<Vec<_>>>()?;
-
-            let projections = self.compile_select_list(&select.select_list)?;
-
-            plan = ExecutionPlan::GroupBy {
-                input: Box::new(plan),
-                group_expressions,
-                aggregate_expressions: projections,
-            };
-        } else {
-            // Apply projection for non-grouped queries
-            let projections = self.compile_select_list(&select.select_list)?;
-            if !projections.is_empty() {
-                plan = ExecutionPlan::Project {
-                    input: Box::new(plan),
-                    expressions: projections,
+        let plan = match &statement {
+            Statement::Select(select) => self.select_compiler.compile_select(select.clone())?,
+            Statement::Insert(insert) => {
+                let plan = self.statement_compiler.compile_insert(insert.clone())?;
+                let metadata = QueryMetadata {
+                    tables_accessed: vec![insert.table.clone()],
+                    columns_accessed: vec![],
+                    functions_used: vec![],
+                    requires_spatial_index: false,
+                    requires_vector_index: false,
                 };
-            }
-        }
-
-        // Apply HAVING clause if present
-        if let Some(having_expr) = select.having {
-            let compiled_having = self.type_checker.compile_expression(having_expr)?;
-            plan = ExecutionPlan::Having {
-                input: Box::new(plan),
-                predicate: compiled_having,
-            };
-        }
-
-        // Apply ORDER BY if present
-        if !select.order_by.is_empty() {
-            let sort_keys = self.compile_order_by(&select.order_by)?;
-            plan = ExecutionPlan::Sort {
-                input: Box::new(plan),
-                sort_keys,
-            };
-        }
-
-        // Apply LIMIT if present
-        if let Some(limit) = select.limit {
-            plan = ExecutionPlan::Limit {
-                input: Box::new(plan),
-                count: limit,
-                offset: select.offset,
-            };
-        }
-
-        // Generate metadata and cost estimate
-        let metadata = self.generate_metadata(&plan);
-        let estimated_cost = self.plan_generator.cost_estimator.estimate_cost(&plan);
-
-        Ok(CompiledQuery {
-            plan,
-            metadata,
-            estimated_cost,
-        })
-    }
-
-    /// Create base table scan
-    fn create_base_scan(&self, select: &SelectStatement) -> Result<ExecutionPlan> {
-        let table_name = match &select.from {
-            Some(FromClause::Table { name, .. }) => name.clone(),
-            Some(FromClause::Subquery { .. }) => {
-                return Err(HyperQLError::SemanticError {
-                    message: "Subqueries are not yet supported".to_string(),
-                    context: vec!["compiler".to_string()],
-                });
-            }
-            None => {
-                return Err(HyperQLError::SemanticError {
-                    message: "FROM clause is required".to_string(),
-                    context: vec!["compiler".to_string()],
-                });
-            }
-        };
-
-        Ok(ExecutionPlan::Scan {
-            table: table_name,
-            filter: None,
-            projection: vec![],
-        })
-    }
-
-    /// Compile SELECT list
-    fn compile_select_list(&self, select_list: &[SelectItem]) -> Result<Vec<CompiledProjection>> {
-        let mut projections = Vec::new();
-
-        for item in select_list {
-            match item {
-                SelectItem::Wildcard => {
-                    // TODO: Expand wildcard based on table schema
-                    projections.push(CompiledProjection {
-                        expression: CompiledExpression::Column {
-                            table: None,
-                            name: "*".to_string(),
-                            value_type: ValueType::String, // Placeholder
-                        },
-                        alias: None,
-                        output_name: "*".to_string(),
-                    });
-                }
-                SelectItem::Expression { expr, alias } => {
-                    let compiled_expr = self.type_checker.compile_expression(expr.clone())?;
-                    let output_name = alias.clone().unwrap_or_else(|| {
-                        self.generate_expression_name(expr)
-                    });
-
-                    projections.push(CompiledProjection {
-                        expression: compiled_expr,
-                        alias: alias.clone(),
-                        output_name,
-                    });
-                }
-            }
-        }
-
-        Ok(projections)
-    }
-
-    /// Compile ORDER BY clause
-    fn compile_order_by(&self, order_by: &[OrderByItem]) -> Result<Vec<CompiledSortKey>> {
-        let mut sort_keys = Vec::new();
-
-        for item in order_by {
-            let compiled_expr = self.type_checker.compile_expression(item.expr.clone())?;
-            sort_keys.push(CompiledSortKey {
-                expression: compiled_expr,
-                direction: item.direction.clone(),
-            });
-        }
-
-        Ok(sort_keys)
-    }
-
-    /// Generate expression name for output
-    fn generate_expression_name(&self, expr: &Expression) -> String {
-        match expr {
-            Expression::Column(col_ref) => col_ref.name.clone(),
-            Expression::Function { name, .. } => name.clone(),
-            Expression::Literal(literal) => format!("{:?}", literal),
-            _ => "expr".to_string(),
-        }
-    }
-
-    /// Compile traverse patterns
-    fn compile_traverse_patterns(&self, patterns: &[crate::ast::TraversePattern]) -> Result<Vec<CompiledTraversePattern>> {
-        let mut compiled_patterns = Vec::new();
-
-        for pattern in patterns {
-            let compiled_start_node = CompiledNodePattern {
-                variable: pattern.start_node.variable.clone(),
-                label: pattern.start_node.label.clone(),
-                properties: if let Some(props) = &pattern.start_node.properties {
-                    Some(self.type_checker.compile_expression(props.clone())?)
-                } else {
-                    None
-                },
-            };
-
-            let compiled_end_node = CompiledNodePattern {
-                variable: pattern.end_node.variable.clone(),
-                label: pattern.end_node.label.clone(),
-                properties: if let Some(props) = &pattern.end_node.properties {
-                    Some(self.type_checker.compile_expression(props.clone())?)
-                } else {
-                    None
-                },
-            };
-
-            let compiled_relationship = CompiledRelationshipPattern {
-                variable: pattern.relationship.variable.clone(),
-                rel_type: pattern.relationship.rel_type.clone(),
-                direction: pattern.relationship.direction.clone(),
-                variable_length: pattern.relationship.variable_length.clone(),
-                optional: pattern.relationship.optional,
-                properties: if let Some(props) = &pattern.relationship.properties {
-                    Some(self.type_checker.compile_expression(props.clone())?)
-                } else {
-                    None
-                },
-            };
-
-            compiled_patterns.push(CompiledTraversePattern {
-                start_node: compiled_start_node,
-                relationship: compiled_relationship,
-                end_node: compiled_end_node,
-            });
-        }
-
-        Ok(compiled_patterns)
-    }
-
-    /// Generate query metadata
-    fn generate_metadata(&self, plan: &ExecutionPlan) -> QueryMetadata {
-        let mut metadata = QueryMetadata {
-            tables_accessed: Vec::new(),
-            columns_accessed: Vec::new(),
-            functions_used: Vec::new(),
-            requires_spatial_index: false,
-            requires_vector_index: false,
-        };
-
-        self.collect_metadata(plan, &mut metadata);
-        metadata
-    }
-
-    /// Compile an INSERT statement
-    fn compile_insert(&self, insert: InsertStatement) -> Result<CompiledQuery> {
-        let mut compiled_values = Vec::new();
-
-        for value_row in insert.values {
-            let mut compiled_row = Vec::new();
-            for value_expr in value_row {
-                let compiled_expr = self.type_checker.compile_expression(value_expr)?;
-                compiled_row.push(compiled_expr);
-            }
-            compiled_values.push(compiled_row);
-        }
-
-        let plan = ExecutionPlan::Insert {
-            table: insert.table.clone(),
-            columns: insert.columns,
-            values: compiled_values,
-        };
-
-        // Generate metadata and cost estimate
-        let metadata = QueryMetadata {
-            tables_accessed: vec![insert.table],
-            columns_accessed: vec![],
-            functions_used: vec![],
-            requires_spatial_index: false,
-            requires_vector_index: false,
-        };
-
-        let estimated_cost = ExecutionCost {
-            estimated_rows: 1, // INSERT typically affects one or few rows
-            estimated_cpu_cost: 0.5,
-            estimated_memory_mb: 1.0,
-            estimated_io_ops: 1,
-        };
-
-        Ok(CompiledQuery {
-            plan,
-            metadata,
-            estimated_cost,
-        })
-    }
-
-    /// Compile an UPDATE statement
-    fn compile_update(&self, update: UpdateStatement) -> Result<CompiledQuery> {
-        let mut compiled_assignments = Vec::new();
-
-        for assignment in update.assignments {
-            let compiled_value = self.type_checker.compile_expression(assignment.value)?;
-            compiled_assignments.push(CompiledAssignment {
-                column: assignment.column,
-                value: compiled_value,
-            });
-        }
-
-        let compiled_filter = if let Some(where_expr) = update.where_clause {
-            Some(self.type_checker.compile_expression(where_expr)?)
-        } else {
-            None
-        };
-
-        let plan = ExecutionPlan::Update {
-            table: update.table.clone(),
-            assignments: compiled_assignments,
-            filter: compiled_filter,
-        };
-
-        // Generate metadata and cost estimate
-        let metadata = QueryMetadata {
-            tables_accessed: vec![update.table],
-            columns_accessed: vec![],
-            functions_used: vec![],
-            requires_spatial_index: false,
-            requires_vector_index: false,
-        };
-
-        let estimated_cost = ExecutionCost {
-            estimated_rows: 100, // UPDATE may affect multiple rows
-            estimated_cpu_cost: 2.0,
-            estimated_memory_mb: 5.0,
-            estimated_io_ops: 50,
-        };
-
-        Ok(CompiledQuery {
-            plan,
-            metadata,
-            estimated_cost,
-        })
-    }
-
-    /// Compile a DELETE statement
-    fn compile_delete(&self, delete: DeleteStatement) -> Result<CompiledQuery> {
-        let compiled_filter = if let Some(where_expr) = delete.where_clause {
-            Some(self.type_checker.compile_expression(where_expr)?)
-        } else {
-            None
-        };
-
-        let plan = ExecutionPlan::Delete {
-            table: delete.table.clone(),
-            filter: compiled_filter,
-        };
-
-        // Generate metadata and cost estimate
-        let metadata = QueryMetadata {
-            tables_accessed: vec![delete.table],
-            columns_accessed: vec![],
-            functions_used: vec![],
-            requires_spatial_index: false,
-            requires_vector_index: false,
-        };
-
-        let estimated_cost = ExecutionCost {
-            estimated_rows: 100, // DELETE may affect multiple rows
-            estimated_cpu_cost: 1.5,
-            estimated_memory_mb: 3.0,
-            estimated_io_ops: 30,
-        };
-
-        Ok(CompiledQuery {
-            plan,
-            metadata,
-            estimated_cost,
-        })
-    }
-
-    /// Recursively collect metadata from execution plan
-    fn collect_metadata(&self, plan: &ExecutionPlan, metadata: &mut QueryMetadata) {
-        match plan {
-            ExecutionPlan::Scan { table, .. } => {
-                if !metadata.tables_accessed.contains(table) {
-                    metadata.tables_accessed.push(table.clone());
-                }
-            }
-            ExecutionPlan::Filter { input, predicate } => {
-                self.collect_metadata(input, metadata);
-                self.collect_expression_metadata(predicate, metadata);
-            }
-            ExecutionPlan::Project { input, expressions } => {
-                self.collect_metadata(input, metadata);
-                for proj in expressions {
-                    self.collect_expression_metadata(&proj.expression, metadata);
-                }
-            }
-            ExecutionPlan::GroupBy { input, group_expressions, aggregate_expressions } => {
-                self.collect_metadata(input, metadata);
-                for expr in group_expressions {
-                    self.collect_expression_metadata(expr, metadata);
-                }
-                for proj in aggregate_expressions {
-                    self.collect_expression_metadata(&proj.expression, metadata);
-                }
-            }
-            ExecutionPlan::Having { input, predicate } => {
-                self.collect_metadata(input, metadata);
-                self.collect_expression_metadata(predicate, metadata);
-            }
-            ExecutionPlan::Sort { input, sort_keys } => {
-                self.collect_metadata(input, metadata);
-                for key in sort_keys {
-                    self.collect_expression_metadata(&key.expression, metadata);
-                }
-            }
-            ExecutionPlan::Limit { input, .. } => {
-                self.collect_metadata(input, metadata);
-            }
-            ExecutionPlan::Insert { table, values, .. } => {
-                if !metadata.tables_accessed.contains(table) {
-                    metadata.tables_accessed.push(table.clone());
-                }
-                for row in values {
-                    for expr in row {
-                        self.collect_expression_metadata(expr, metadata);
-                    }
-                }
-            }
-            ExecutionPlan::Update { table, assignments, filter } => {
-                if !metadata.tables_accessed.contains(table) {
-                    metadata.tables_accessed.push(table.clone());
-                }
-                for assignment in assignments {
-                    self.collect_expression_metadata(&assignment.value, metadata);
-                }
-                if let Some(filter_expr) = filter {
-                    self.collect_expression_metadata(filter_expr, metadata);
-                }
-            }
-            ExecutionPlan::Delete { table, filter } => {
-                if !metadata.tables_accessed.contains(table) {
-                    metadata.tables_accessed.push(table.clone());
-                }
-                if let Some(filter_expr) = filter {
-                    self.collect_expression_metadata(filter_expr, metadata);
-                }
-            }
-            ExecutionPlan::Traverse { patterns } => {
-                // Mark that this query uses graph traversal
-                for pattern in patterns {
-                    if let Some(label) = &pattern.start_node.label {
-                        if !metadata.tables_accessed.contains(label) {
-                            metadata.tables_accessed.push(label.clone());
-                        }
-                    }
-                    if let Some(label) = &pattern.end_node.label {
-                        if !metadata.tables_accessed.contains(label) {
-                            metadata.tables_accessed.push(label.clone());
-                        }
-                    }
-                    if let Some(props) = &pattern.start_node.properties {
-                        self.collect_expression_metadata(props, metadata);
-                    }
-                    if let Some(props) = &pattern.end_node.properties {
-                        self.collect_expression_metadata(props, metadata);
-                    }
-                    if let Some(props) = &pattern.relationship.properties {
-                        self.collect_expression_metadata(props, metadata);
-                    }
-                }
-            }
-            ExecutionPlan::GeometricOperation { op_type, params, input } => {
-                metadata.requires_spatial_index = true;
-                for (_key, expr) in params {
-                    self.collect_expression_metadata(expr, metadata);
-                }
-                if let Some(input_plan) = input {
-                    self.collect_metadata(input_plan, metadata);
-                }
-            }
-            ExecutionPlan::VectorOperation { op_type, params, input } => {
-                metadata.requires_vector_index = true;
-                for (_key, expr) in params {
-                    self.collect_expression_metadata(expr, metadata);
-                }
-                if let Some(input_plan) = input {
-                    self.collect_metadata(input_plan, metadata);
-                }
-            }
-            ExecutionPlan::StreamOperation { op_type, params, input } => {
-                for (_key, expr) in params {
-                    self.collect_expression_metadata(expr, metadata);
-                }
-                if let Some(input_plan) = input {
-                    self.collect_metadata(input_plan, metadata);
-                }
-            }
-            ExecutionPlan::TimeSeriesOperation { op_type, params, input } => {
-                for (_key, expr) in params {
-                    self.collect_expression_metadata(expr, metadata);
-                }
-                if let Some(input_plan) = input {
-                    self.collect_metadata(input_plan, metadata);
-                }
-            }
-            ExecutionPlan::GraphOperation { op_type, params, input } => {
-                for (_key, expr) in params {
-                    self.collect_expression_metadata(expr, metadata);
-                }
-                if let Some(input_plan) = input {
-                    self.collect_metadata(input_plan, metadata);
-                }
-            }
-        }
-    }
-
-    /// Collect metadata from compiled expressions
-    fn collect_expression_metadata(&self, expr: &CompiledExpression, metadata: &mut QueryMetadata) {
-        match expr {
-            CompiledExpression::Column { name, .. } => {
-                if !metadata.columns_accessed.contains(name) {
-                    metadata.columns_accessed.push(name.clone());
-                }
-            }
-            CompiledExpression::Function { name, args, .. } => {
-                if !metadata.functions_used.contains(name) {
-                    metadata.functions_used.push(name.clone());
-                }
-                for arg in args {
-                    self.collect_expression_metadata(arg, metadata);
-                }
-            }
-            CompiledExpression::Binary { left, right, .. } => {
-                self.collect_expression_metadata(left, metadata);
-                self.collect_expression_metadata(right, metadata);
-            }
-            CompiledExpression::Unary { expr, .. } => {
-                self.collect_expression_metadata(expr, metadata);
-            }
-            CompiledExpression::Literal(_) => {
-                // No metadata to collect from literals
-            }
-        }
-    }
-}
-
-impl TypeChecker {
-    /// Create a new type checker
-    pub fn new() -> Self {
-        Self {
-            schemas: HashMap::new(),
-        }
-    }
-
-    /// Compile an expression with type checking
-    pub fn compile_expression(&self, expr: Expression) -> Result<CompiledExpression> {
-        match expr {
-            Expression::Literal(literal) => {
-                let (value, value_type) = self.compile_literal(literal)?;
-                Ok(CompiledExpression::Literal(value))
-            }
-            Expression::Column(col_ref) => {
-                let value_type = self.infer_column_type(&col_ref)?;
-                Ok(CompiledExpression::Column {
-                    table: col_ref.table,
-                    name: col_ref.name,
-                    value_type,
-                })
-            }
-            Expression::Binary { left, op, right } => {
-                let compiled_left = self.compile_expression(*left)?;
-                let compiled_right = self.compile_expression(*right)?;
-                let result_type = self.infer_binary_result_type(&compiled_left, &op, &compiled_right)?;
-
-                Ok(CompiledExpression::Binary {
-                    left: Box::new(compiled_left),
-                    op,
-                    right: Box::new(compiled_right),
-                    result_type,
-                })
-            }
-            Expression::Unary { op, expr } => {
-                let compiled_expr = self.compile_expression(*expr)?;
-                let result_type = self.infer_unary_result_type(&op, &compiled_expr)?;
-
-                Ok(CompiledExpression::Unary {
-                    op,
-                    expr: Box::new(compiled_expr),
-                    result_type,
-                })
-            }
-            Expression::Function { name, args } => {
-                let mut compiled_args = Vec::new();
-                for arg in args {
-                    compiled_args.push(self.compile_expression(arg)?);
-                }
-                let result_type = self.infer_function_result_type(&name, &compiled_args)?;
-
-                Ok(CompiledExpression::Function {
-                    name,
-                    args: compiled_args,
-                    result_type,
-                })
-            }
-            Expression::Geometric(geom_expr) => {
-                // Compile geometric expressions into plan generation
-                self.compile_geometric_expression(geom_expr)
-            }
-            Expression::Vector(vector_expr) => {
-                // Compile vector expressions into plan generation
-                self.compile_vector_expression(vector_expr)
-            }
-        }
-    }
-
-    /// Compile a literal value
-    fn compile_literal(&self, literal: Literal) -> Result<(Value, ValueType)> {
-        match literal {
-            Literal::Null => Ok((Value::Null, ValueType::Null)),
-            Literal::Bool(b) => Ok((Value::Bool(b), ValueType::Bool)),
-            Literal::Int(i) => Ok((Value::Int(i), ValueType::Int)),
-            Literal::Float(f) => Ok((Value::Float(f), ValueType::Float)),
-            Literal::String(s) => Ok((Value::String(s), ValueType::String)),
-            Literal::EntityId(id) => Ok((Value::EntityId(id), ValueType::EntityId)),
-        }
-    }
-
-    /// Infer column type (simplified for now)
-    fn infer_column_type(&self, col_ref: &ColumnRef) -> Result<ValueType> {
-        // TODO: Look up actual schema
-        // For now, default to string type
-        Ok(ValueType::String)
-    }
-
-    /// Infer binary operation result type
-    fn infer_binary_result_type(&self, left: &CompiledExpression, op: &BinaryOperator, right: &CompiledExpression) -> Result<ValueType> {
-        match op {
-            BinaryOperator::Equal | BinaryOperator::NotEqual |
-            BinaryOperator::LessThan | BinaryOperator::LessThanOrEqual |
-            BinaryOperator::GreaterThan | BinaryOperator::GreaterThanOrEqual |
-            BinaryOperator::And | BinaryOperator::Or => Ok(ValueType::Bool),
-
-            BinaryOperator::Add | BinaryOperator::Subtract |
-            BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Modulo => {
-                // TODO: Implement proper numeric type promotion
-                Ok(ValueType::Float)
-            }
-
-            BinaryOperator::Like | BinaryOperator::NotLike => Ok(ValueType::Bool),
-            BinaryOperator::In | BinaryOperator::NotIn => Ok(ValueType::Bool),
-        }
-    }
-
-    /// Infer unary operation result type
-    fn infer_unary_result_type(&self, op: &UnaryOperator, expr: &CompiledExpression) -> Result<ValueType> {
-        match op {
-            UnaryOperator::Not => Ok(ValueType::Bool),
-            UnaryOperator::Minus | UnaryOperator::Plus => {
-                // TODO: Preserve input numeric type
-                Ok(ValueType::Float)
-            }
-        }
-    }
-
-    /// Infer function result type
-    fn infer_function_result_type(&self, name: &str, _args: &[CompiledExpression]) -> Result<ValueType> {
-        match name.to_uppercase().as_str() {
-            // Aggregate functions
-            "COUNT" => Ok(ValueType::Int),      // COUNT always returns integer
-            "SUM" => Ok(ValueType::Float),      // SUM can return float for safety
-            "AVG" => Ok(ValueType::Float),      // AVG always returns float
-            "MIN" | "MAX" => Ok(ValueType::Float), // MIN/MAX can return various types, default to float
-
-            // String functions
-            "UPPER" | "LOWER" | "TRIM" => Ok(ValueType::String),
-            "LENGTH" => Ok(ValueType::Int),
-
-            // Mathematical functions
-            "ABS" | "ROUND" | "FLOOR" | "CEIL" => Ok(ValueType::Float),
-            "SQRT" | "POW" | "EXP" | "LOG" => Ok(ValueType::Float),
-
-            // Date/Time functions
-            "NOW" | "CURRENT_TIMESTAMP" => Ok(ValueType::Timestamp),
-
-            // Geometric functions - all return specific types for plan generation
-            "HYPERBOLIC_DISTANCE" | "GEODESIC_DISTANCE" => Ok(ValueType::Distance),
-            "WITHIN_RADIUS" | "CONTAINS" | "INTERSECTS" => Ok(ValueType::Bool),
-
-            // Vector functions - all return specific types for plan generation
-            "COSINE_SIMILARITY" | "DOT_PRODUCT" => Ok(ValueType::Float),
-            "EUCLIDEAN_DISTANCE" => Ok(ValueType::Distance),
-            "NORMALIZE" => Ok(ValueType::Vector),
-            "KNN" | "SIMILARITY_SEARCH" => Ok(ValueType::List(Box::new(ValueType::EntityId))),
-
-            _ => Ok(ValueType::String), // Default for unknown functions
-        }
-    }
-
-    /// Compile geometric expressions into function calls that generate plans
-    fn compile_geometric_expression(&self, geom_expr: crate::ast::geometric::GeometricExpression) -> Result<CompiledExpression> {
-        match geom_expr {
-            crate::ast::geometric::GeometricExpression::Within { target, radius, reference } => {
-                let compiled_target = self.compile_expression(*target)?;
-                let compiled_reference = self.compile_expression(*reference)?;
-                let compiled_radius = CompiledExpression::Literal(Value::Float(radius));
-
-                Ok(CompiledExpression::Function {
-                    name: "WITHIN_RADIUS".to_string(),
-                    args: vec![compiled_target, compiled_reference, compiled_radius],
-                    result_type: ValueType::Bool,
-                })
-            }
-            crate::ast::geometric::GeometricExpression::Near { target, reference, max_distance } => {
-                let compiled_target = self.compile_expression(*target)?;
-                let compiled_reference = self.compile_expression(*reference)?;
-                let compiled_max_distance = CompiledExpression::Literal(Value::Float(max_distance));
-
-                Ok(CompiledExpression::Function {
-                    name: "HYPERBOLIC_DISTANCE".to_string(),
-                    args: vec![compiled_target, compiled_reference, compiled_max_distance],
-                    result_type: ValueType::Distance,
-                })
-            }
-            crate::ast::geometric::GeometricExpression::InRadius { target, center, radius } => {
-                let compiled_target = self.compile_expression(*target)?;
-                let compiled_center = self.compile_expression(*center)?;
-                let compiled_radius = CompiledExpression::Literal(Value::Float(radius));
-
-                Ok(CompiledExpression::Function {
-                    name: "WITHIN_RADIUS".to_string(),
-                    args: vec![compiled_target, compiled_center, compiled_radius],
-                    result_type: ValueType::Bool,
-                })
-            }
-        }
-    }
-
-    /// Compile vector expressions into function calls that generate plans
-    fn compile_vector_expression(&self, vector_expr: VectorExpression) -> Result<CompiledExpression> {
-        match vector_expr {
-            VectorExpression::Similarity { vector_name, reference, metric, threshold, vector_type } => {
-                let compiled_vector_name = CompiledExpression::Literal(Value::String(vector_name));
-                let compiled_reference = self.compile_expression(*reference)?;
-                let compiled_metric = CompiledExpression::Literal(Value::String(format!("{:?}", metric)));
-                let compiled_threshold = match threshold {
-                    Some(t) => CompiledExpression::Literal(Value::Float(t)),
-                    None => CompiledExpression::Literal(Value::Null),
+                let estimated_cost = ExecutionCost {
+                    estimated_rows: 1,
+                    estimated_cpu_cost: 0.5,
+                    estimated_memory_mb: 1.0,
+                    estimated_io_ops: 1,
                 };
-                let compiled_vector_type = CompiledExpression::Literal(Value::String(format!("{:?}", vector_type)));
-
-                Ok(CompiledExpression::Function {
-                    name: "COSINE_SIMILARITY".to_string(),
-                    args: vec![compiled_vector_name, compiled_reference, compiled_metric, compiled_threshold, compiled_vector_type],
-                    result_type: ValueType::Float,
-                })
-            }
-            VectorExpression::KNN { vector_name, reference, k, metric, vector_type } => {
-                let compiled_vector_name = CompiledExpression::Literal(Value::String(vector_name));
-                let compiled_reference = self.compile_expression(*reference)?;
-                let compiled_k = CompiledExpression::Literal(Value::Int(k as i64));
-                let compiled_metric = CompiledExpression::Literal(Value::String(format!("{:?}", metric)));
-                let compiled_vector_type = CompiledExpression::Literal(Value::String(format!("{:?}", vector_type)));
-
-                Ok(CompiledExpression::Function {
-                    name: "KNN".to_string(),
-                    args: vec![compiled_vector_name, compiled_reference, compiled_k, compiled_metric, compiled_vector_type],
-                    result_type: ValueType::List(Box::new(ValueType::EntityId)),
-                })
-            }
-        }
-    }
-}
-
-impl PlanGenerator {
-    /// Create a new plan generator
-    pub fn new() -> Self {
-        Self {
-            cost_estimator: CostEstimator,
-        }
-    }
-}
-
-impl CostEstimator {
-    /// Estimate execution cost for a plan
-    pub fn estimate_cost(&self, plan: &ExecutionPlan) -> ExecutionCost {
-        match plan {
-            ExecutionPlan::Scan { .. } => ExecutionCost {
-                estimated_rows: 1000, // TODO: Use actual statistics
-                estimated_cpu_cost: 1.0,
-                estimated_memory_mb: 10.0,
-                estimated_io_ops: 100,
+                return Ok(CompiledQuery {
+                    plan,
+                    metadata,
+                    estimated_cost,
+                });
             },
-            ExecutionPlan::Filter { input, .. } => {
-                let input_cost = self.estimate_cost(input);
-                ExecutionCost {
-                    estimated_rows: input_cost.estimated_rows / 2, // Assume 50% selectivity
-                    estimated_cpu_cost: input_cost.estimated_cpu_cost + 0.5,
-                    estimated_memory_mb: input_cost.estimated_memory_mb,
-                    estimated_io_ops: input_cost.estimated_io_ops,
-                }
-            }
-            ExecutionPlan::Project { input, .. } => {
-                let input_cost = self.estimate_cost(input);
-                ExecutionCost {
-                    estimated_rows: input_cost.estimated_rows,
-                    estimated_cpu_cost: input_cost.estimated_cpu_cost + 0.1,
-                    estimated_memory_mb: input_cost.estimated_memory_mb,
-                    estimated_io_ops: input_cost.estimated_io_ops,
-                }
-            }
-            ExecutionPlan::GroupBy { input, group_expressions, .. } => {
-                let input_cost = self.estimate_cost(input);
-                // Grouping typically reduces row count but increases CPU and memory usage
-                let estimated_groups = (input_cost.estimated_rows / 10).max(1);
-                ExecutionCost {
-                    estimated_rows: estimated_groups,
-                    estimated_cpu_cost: input_cost.estimated_cpu_cost + (input_cost.estimated_rows as f64 * 0.01),
-                    estimated_memory_mb: input_cost.estimated_memory_mb + (group_expressions.len() as f64 * 5.0),
-                    estimated_io_ops: input_cost.estimated_io_ops,
-                }
-            }
-            ExecutionPlan::Having { input, .. } => {
-                let input_cost = self.estimate_cost(input);
-                ExecutionCost {
-                    estimated_rows: input_cost.estimated_rows / 2, // Assume 50% selectivity for HAVING
-                    estimated_cpu_cost: input_cost.estimated_cpu_cost + 0.3,
-                    estimated_memory_mb: input_cost.estimated_memory_mb,
-                    estimated_io_ops: input_cost.estimated_io_ops,
-                }
-            }
-            ExecutionPlan::Sort { input, .. } => {
-                let input_cost = self.estimate_cost(input);
-                ExecutionCost {
-                    estimated_rows: input_cost.estimated_rows,
-                    estimated_cpu_cost: input_cost.estimated_cpu_cost + (input_cost.estimated_rows as f64 * 0.001),
-                    estimated_memory_mb: input_cost.estimated_memory_mb * 2.0, // Sorting requires extra memory
-                    estimated_io_ops: input_cost.estimated_io_ops,
-                }
-            }
-            ExecutionPlan::Limit { input, count, .. } => {
-                let input_cost = self.estimate_cost(input);
-                ExecutionCost {
-                    estimated_rows: (*count).min(input_cost.estimated_rows),
-                    estimated_cpu_cost: input_cost.estimated_cpu_cost,
-                    estimated_memory_mb: input_cost.estimated_memory_mb,
-                    estimated_io_ops: input_cost.estimated_io_ops,
-                }
-            }
-            ExecutionPlan::Insert { values, .. } => {
-                ExecutionCost {
-                    estimated_rows: values.len() as u64,
-                    estimated_cpu_cost: values.len() as f64 * 0.1,
-                    estimated_memory_mb: 2.0,
-                    estimated_io_ops: values.len() as u64,
-                }
-            }
-            ExecutionPlan::Update { .. } => {
-                ExecutionCost {
-                    estimated_rows: 100, // Estimate number of rows affected
+            Statement::Update(update) => {
+                let plan = self.statement_compiler.compile_update(update.clone())?;
+                let metadata = QueryMetadata {
+                    tables_accessed: vec![update.table.clone()],
+                    columns_accessed: vec![],
+                    functions_used: vec![],
+                    requires_spatial_index: false,
+                    requires_vector_index: false,
+                };
+                let estimated_cost = ExecutionCost {
+                    estimated_rows: 100,
                     estimated_cpu_cost: 2.0,
                     estimated_memory_mb: 5.0,
                     estimated_io_ops: 50,
-                }
-            }
-            ExecutionPlan::Delete { .. } => {
-                ExecutionCost {
-                    estimated_rows: 100, // Estimate number of rows affected
+                };
+                return Ok(CompiledQuery {
+                    plan,
+                    metadata,
+                    estimated_cost,
+                });
+            },
+            Statement::Delete(delete) => {
+                let plan = self.statement_compiler.compile_delete(delete.clone())?;
+                let metadata = QueryMetadata {
+                    tables_accessed: vec![delete.table.clone()],
+                    columns_accessed: vec![],
+                    functions_used: vec![],
+                    requires_spatial_index: false,
+                    requires_vector_index: false,
+                };
+                let estimated_cost = ExecutionCost {
+                    estimated_rows: 100,
                     estimated_cpu_cost: 1.5,
                     estimated_memory_mb: 3.0,
                     estimated_io_ops: 30,
-                }
-            }
-            ExecutionPlan::Traverse { patterns } => {
-                // Graph traversal costs depend on pattern complexity
-                let pattern_count = patterns.len() as f64;
-                let estimated_traversal_cost = pattern_count * 10.0; // Base cost per pattern
+                };
+                return Ok(CompiledQuery {
+                    plan,
+                    metadata,
+                    estimated_cost,
+                });
+            },
+        };
 
-                ExecutionCost {
-                    estimated_rows: 1000, // Estimate typical traversal result size
-                    estimated_cpu_cost: estimated_traversal_cost,
-                    estimated_memory_mb: pattern_count * 20.0, // Memory for graph traversal
-                    estimated_io_ops: (pattern_count * 100.0) as u64, // Graph I/O operations
-                }
-            }
-            ExecutionPlan::GeometricOperation { params, input, .. } => {
-                let base_cost = ExecutionCost {
-                    estimated_rows: 1000,
-                    estimated_cpu_cost: 5.0, // Geometric operations are expensive
-                    estimated_memory_mb: 10.0,
-                    estimated_io_ops: 50,
-                };
-                if let Some(input_plan) = input {
-                    let input_cost = self.estimate_cost(input_plan);
-                    ExecutionCost {
-                        estimated_rows: input_cost.estimated_rows,
-                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
-                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
-                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
-                    }
-                } else {
-                    base_cost
-                }
-            }
-            ExecutionPlan::VectorOperation { params, input, .. } => {
-                let base_cost = ExecutionCost {
-                    estimated_rows: 1000,
-                    estimated_cpu_cost: 8.0, // Vector operations can be very expensive
-                    estimated_memory_mb: 20.0, // Vector operations use more memory
-                    estimated_io_ops: 100,
-                };
-                if let Some(input_plan) = input {
-                    let input_cost = self.estimate_cost(input_plan);
-                    ExecutionCost {
-                        estimated_rows: input_cost.estimated_rows,
-                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
-                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
-                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
-                    }
-                } else {
-                    base_cost
-                }
-            }
-            ExecutionPlan::StreamOperation { params, input, .. } => {
-                let base_cost = ExecutionCost {
-                    estimated_rows: 5000, // Streams typically produce many events
-                    estimated_cpu_cost: 3.0,
-                    estimated_memory_mb: 50.0, // Stream buffering
-                    estimated_io_ops: 200,
-                };
-                if let Some(input_plan) = input {
-                    let input_cost = self.estimate_cost(input_plan);
-                    ExecutionCost {
-                        estimated_rows: input_cost.estimated_rows + base_cost.estimated_rows,
-                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
-                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
-                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
-                    }
-                } else {
-                    base_cost
-                }
-            }
-            ExecutionPlan::TimeSeriesOperation { params, input, .. } => {
-                let base_cost = ExecutionCost {
-                    estimated_rows: 2000, // Time series typically have many data points
-                    estimated_cpu_cost: 4.0,
-                    estimated_memory_mb: 15.0,
-                    estimated_io_ops: 75,
-                };
-                if let Some(input_plan) = input {
-                    let input_cost = self.estimate_cost(input_plan);
-                    ExecutionCost {
-                        estimated_rows: input_cost.estimated_rows,
-                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
-                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
-                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
-                    }
-                } else {
-                    base_cost
-                }
-            }
-            ExecutionPlan::GraphOperation { params, input, .. } => {
-                let base_cost = ExecutionCost {
-                    estimated_rows: 1000,
-                    estimated_cpu_cost: 15.0, // Graph algorithms are very expensive
-                    estimated_memory_mb: 100.0, // Graph algorithms use significant memory
-                    estimated_io_ops: 500,
-                };
-                if let Some(input_plan) = input {
-                    let input_cost = self.estimate_cost(input_plan);
-                    ExecutionCost {
-                        estimated_rows: input_cost.estimated_rows,
-                        estimated_cpu_cost: input_cost.estimated_cpu_cost + base_cost.estimated_cpu_cost,
-                        estimated_memory_mb: input_cost.estimated_memory_mb + base_cost.estimated_memory_mb,
-                        estimated_io_ops: input_cost.estimated_io_ops + base_cost.estimated_io_ops,
-                    }
-                } else {
-                    base_cost
-                }
-            }
-        }
+        let metadata = self.metadata_generator.generate_metadata(&plan);
+        let estimated_cost = self.cost_estimator.estimate_cost(&plan);
+
+        Ok(CompiledQuery {
+            plan,
+            metadata,
+            estimated_cost,
+        })
     }
+
+
+
+
+
+
+
+
+
+
+
+
 }
+
 
 impl Default for Compiler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Default for TypeChecker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Default for PlanGenerator {
     fn default() -> Self {
         Self::new()
     }
