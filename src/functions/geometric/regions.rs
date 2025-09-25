@@ -17,7 +17,6 @@
 //! facilitate integration with the actual hyperbolic geometry engine.
 
 use crate::{HyperQLError, types::Position3D};
-use super::distance;
 
 /// Check if a position is within a hyperbolic radius of a center point
 pub fn within_radius(position: &Position3D, center: &Position3D, radius: f64) -> Result<bool, HyperQLError> {

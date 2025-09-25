@@ -18,6 +18,9 @@
 //! maintaining clean interfaces for future real implementations.
 
 use crate::{HyperQLError, types::Position3D};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Compute hyperbolic distance between two positions in Poincaré ball model
 pub fn hyperbolic_distance(pos1: &Position3D, pos2: &Position3D) -> Result<f64, HyperQLError> {
@@ -62,15 +65,50 @@ pub fn hyperbolic_distance(pos1: &Position3D, pos2: &Position3D) -> Result<f64, 
     let denominator = 1.0 - dot_product;
 
     // Check for numerical issues (denominator too close to zero)
-    if denominator.abs() < 1e-12 {
+    // Use a larger epsilon threshold for better stability
+    const STABILITY_EPSILON: f64 = 1e-10;
+    if denominator.abs() < STABILITY_EPSILON {
         return Err(HyperQLError::GeometricError {
             operation: "hyperbolic_distance".to_string(),
-            reason: "Numerical instability: positions too close to boundary".to_string(),
-            positions: vec![format!("denominator={:.15}, dot_product={:.15}", denominator, dot_product)],
+            reason: "Numerical instability: positions too close to boundary or each other".to_string(),
+            positions: vec![format!("denominator={:.15}, dot_product={:.15}, epsilon_threshold={:.15}", denominator, dot_product, STABILITY_EPSILON)],
         });
     }
 
+    // Additional stability check: prevent division by very small numbers
+    if denominator.abs() < STABILITY_EPSILON * 10.0 {
+        // Apply defensive clamping for borderline cases
+        let adjusted_denominator = if denominator >= 0.0 {
+            denominator.max(STABILITY_EPSILON * 10.0)
+        } else {
+            denominator.min(-STABILITY_EPSILON * 10.0)
+        };
+
+        // Recompute with adjusted denominator for better stability
+        let mobius_x = diff_x / adjusted_denominator;
+        let mobius_y = diff_y / adjusted_denominator;
+        let mobius_z = diff_z / adjusted_denominator;
+        let mobius_norm_sq = mobius_x * mobius_x + mobius_y * mobius_y + mobius_z * mobius_z;
+        let mobius_norm = mobius_norm_sq.sqrt();
+
+        if mobius_norm >= 1.0 {
+            let clamped_norm = 0.99999999_f64;
+            return Ok(clamped_norm.atanh());
+        }
+
+        let distance = mobius_norm.atanh();
+        if !distance.is_finite() || distance < 0.0 {
+            return Err(HyperQLError::GeometricError {
+                operation: "hyperbolic_distance".to_string(),
+                reason: "Invalid distance computation result after stability adjustment".to_string(),
+                positions: vec![format!("distance={:.15}, mobius_norm={:.15}, adjusted_denominator={:.15}", distance, mobius_norm, adjusted_denominator)],
+            });
+        }
+        return Ok(distance);
+    }
+
     // Compute Möbius subtraction: (x-y)/(1-⟨x,y⟩)
+    // This point is reached only if denominator is sufficiently stable
     let mobius_x = diff_x / denominator;
     let mobius_y = diff_y / denominator;
     let mobius_z = diff_z / denominator;
@@ -160,11 +198,22 @@ pub fn cached_hyperbolic_distance(pos1: &Position3D, pos2: &Position3D, cache_ke
         pos1.x, pos1.y, pos1.z, pos2.x, pos2.y, pos2.z, cache_key
     );
 
-    use std::collections::HashMap;
-    use std::sync::Mutex;
+    #[derive(Debug, Clone)]
+    struct CacheEntry {
+        distance: f64,
+        last_accessed: u64, // timestamp in milliseconds
+        access_count: u64,
+    }
 
     lazy_static::lazy_static! {
-        static ref DISTANCE_CACHE: Mutex<HashMap<String, f64>> = Mutex::new(HashMap::new());
+        static ref DISTANCE_CACHE: Mutex<HashMap<String, CacheEntry>> = Mutex::new(HashMap::new());
+    }
+
+    fn get_timestamp_millis() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
     }
 
     // Generate cache key if not provided
@@ -175,14 +224,17 @@ pub fn cached_hyperbolic_distance(pos1: &Position3D, pos2: &Position3D, cache_ke
 
     // Check cache first
     {
-        let cache = DISTANCE_CACHE.lock().map_err(|_| HyperQLError::InternalError {
+        let mut cache = DISTANCE_CACHE.lock().map_err(|_| HyperQLError::InternalError {
             message: "Failed to acquire cache lock".to_string(),
             component: "cached_hyperbolic_distance".to_string(),
             debug_info: "cache_read".to_string(),
         })?;
 
-        if let Some(&cached_distance) = cache.get(&key) {
-            return Ok(cached_distance);
+        if let Some(entry) = cache.get_mut(&key) {
+            // Update access statistics for LRU
+            entry.last_accessed = get_timestamp_millis();
+            entry.access_count += 1;
+            return Ok(entry.distance);
         }
     }
 
@@ -197,12 +249,40 @@ pub fn cached_hyperbolic_distance(pos1: &Position3D, pos2: &Position3D, cache_ke
             debug_info: "cache_write".to_string(),
         })?;
 
-        // Simple cache eviction: clear if too large
-        if cache.len() > 10000 {
-            cache.clear();
+        // LRU cache eviction: remove least recently used entries when cache is full
+        const MAX_CACHE_SIZE: usize = 10000;
+        const EVICTION_BATCH_SIZE: usize = 2000; // Remove 20% when full
+
+        if cache.len() >= MAX_CACHE_SIZE {
+            // Collect entries with their keys and access info for LRU eviction
+            let mut entries_for_eviction: Vec<(String, u64, u64)> = cache
+                .iter()
+                .map(|(k, v)| (k.clone(), v.last_accessed, v.access_count))
+                .collect();
+
+            // Sort by last accessed time (oldest first), then by access count (least used first)
+            entries_for_eviction.sort_by(|a, b| {
+                a.1.cmp(&b.1).then_with(|| a.2.cmp(&b.2))
+            });
+
+            // Remove the least recently used entries
+            let to_remove = entries_for_eviction
+                .into_iter()
+                .take(EVICTION_BATCH_SIZE)
+                .map(|(key, _, _)| key)
+                .collect::<Vec<_>>();
+
+            for key_to_remove in to_remove {
+                cache.remove(&key_to_remove);
+            }
         }
 
-        cache.insert(key, distance);
+        // Insert new entry with current timestamp and initial access count
+        cache.insert(key, CacheEntry {
+            distance,
+            last_accessed: get_timestamp_millis(),
+            access_count: 1,
+        });
     }
 
     Ok(distance)

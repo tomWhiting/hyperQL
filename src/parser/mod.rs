@@ -659,77 +659,136 @@ fn parse_function_call(input: &str) -> Result<Expression> {
     })
 }
 
-/// Parse arithmetic expressions with basic operators
+/// Parse arithmetic expressions with proper operator precedence (PEMDAS)
 fn parse_arithmetic_expression(input: &str) -> Result<Expression> {
+    parse_addition_expression(input)
+}
+
+/// Parse addition and subtraction (lowest precedence)
+fn parse_addition_expression(input: &str) -> Result<Expression> {
     let input = input.trim();
 
-    // Simple left-to-right parsing for basic arithmetic
-    // Priority: *, / then +, -
+    // Find rightmost + or - operator (left-associative)
+    let mut paren_depth = 0;
+    let mut last_op_pos = None;
+    let mut last_op_char = '+';
 
-    // First handle + and - (lowest precedence)
-    for (i, ch) in input.char_indices() {
-        if ch == '+' || ch == '-' {
-            // Make sure it's not at the start (unary operator)
-            if i > 0 {
-                let left_part = &input[..i].trim();
-                let right_part = &input[i + 1..].trim();
+    for (i, ch) in input.char_indices().rev() {
+        match ch {
+            ')' => paren_depth += 1,
+            '(' => paren_depth -= 1,
+            '+' | '-' if paren_depth == 0 && i > 0 => {
+                // Ensure it's not a unary operator at the start
+                last_op_pos = Some(i);
+                last_op_char = ch;
+                break;
+            },
+            _ => {}
+        }
+    }
 
-                let left_expr = if left_part.contains('*') || left_part.contains('/') {
-                    parse_arithmetic_expression(left_part)?
-                } else {
-                    parse_simple_column_or_literal(left_part)?
-                };
+    if let Some(op_pos) = last_op_pos {
+        let left_part = &input[..op_pos].trim();
+        let right_part = &input[op_pos + 1..].trim();
 
-                let right_expr = if right_part.contains('+') || right_part.contains('-') ||
-                                  right_part.contains('*') || right_part.contains('/') {
-                    parse_arithmetic_expression(right_part)?
-                } else {
-                    parse_simple_column_or_literal(right_part)?
-                };
+        let left_expr = parse_addition_expression(left_part)?;
+        let right_expr = parse_multiplication_expression(right_part)?;
 
-                let op = match ch {
-                    '+' => BinaryOperator::Add,
-                    '-' => BinaryOperator::Subtract,
-                    _ => unreachable!(),
-                };
+        let op = match last_op_char {
+            '+' => BinaryOperator::Add,
+            '-' => BinaryOperator::Subtract,
+            _ => unreachable!(),
+        };
 
-                return Ok(Expression::Binary {
-                    left: Box::new(left_expr),
-                    op,
-                    right: Box::new(right_expr),
-                });
+        return Ok(Expression::Binary {
+            left: Box::new(left_expr),
+            op,
+            right: Box::new(right_expr),
+        });
+    }
+
+    // No addition/subtraction found, parse multiplication/division
+    parse_multiplication_expression(input)
+}
+
+/// Parse multiplication and division (higher precedence)
+fn parse_multiplication_expression(input: &str) -> Result<Expression> {
+    let input = input.trim();
+
+    // Find rightmost * or / operator (left-associative)
+    let mut paren_depth = 0;
+    let mut last_op_pos = None;
+    let mut last_op_char = '*';
+
+    for (i, ch) in input.char_indices().rev() {
+        match ch {
+            ')' => paren_depth += 1,
+            '(' => paren_depth -= 1,
+            '*' | '/' if paren_depth == 0 => {
+                last_op_pos = Some(i);
+                last_op_char = ch;
+                break;
+            },
+            _ => {}
+        }
+    }
+
+    if let Some(op_pos) = last_op_pos {
+        let left_part = &input[..op_pos].trim();
+        let right_part = &input[op_pos + 1..].trim();
+
+        let left_expr = parse_multiplication_expression(left_part)?;
+        let right_expr = parse_primary_expression(right_part)?;
+
+        let op = match last_op_char {
+            '*' => BinaryOperator::Multiply,
+            '/' => BinaryOperator::Divide,
+            _ => unreachable!(),
+        };
+
+        return Ok(Expression::Binary {
+            left: Box::new(left_expr),
+            op,
+            right: Box::new(right_expr),
+        });
+    }
+
+    // No multiplication/division found, parse primary expression
+    parse_primary_expression(input)
+}
+
+/// Parse primary expressions (highest precedence: parentheses, literals, columns)
+fn parse_primary_expression(input: &str) -> Result<Expression> {
+    let input = input.trim();
+
+    // Handle parentheses
+    if input.starts_with('(') && input.ends_with(')') {
+        // Check if parentheses are balanced and outermost
+        let mut paren_depth = 0;
+        let mut all_enclosed = true;
+
+        for (i, ch) in input.char_indices() {
+            match ch {
+                '(' => paren_depth += 1,
+                ')' => {
+                    paren_depth -= 1;
+                    if paren_depth == 0 && i < input.len() - 1 {
+                        all_enclosed = false;
+                        break;
+                    }
+                },
+                _ => {}
             }
         }
-    }
 
-    // Then handle * and / (higher precedence)
-    for (i, ch) in input.char_indices() {
-        if ch == '*' || ch == '/' {
-            let left_part = &input[..i].trim();
-            let right_part = &input[i + 1..].trim();
-
-            let left_expr = parse_simple_column_or_literal(left_part)?;
-            let right_expr = if right_part.contains('*') || right_part.contains('/') {
-                parse_arithmetic_expression(right_part)?
-            } else {
-                parse_simple_column_or_literal(right_part)?
-            };
-
-            let op = match ch {
-                '*' => BinaryOperator::Multiply,
-                '/' => BinaryOperator::Divide,
-                _ => unreachable!(),
-            };
-
-            return Ok(Expression::Binary {
-                left: Box::new(left_expr),
-                op,
-                right: Box::new(right_expr),
-            });
+        if all_enclosed && paren_depth == 0 {
+            // Remove outer parentheses and parse the inner expression
+            let inner = &input[1..input.len()-1];
+            return parse_arithmetic_expression(inner);
         }
     }
 
-    // If no operators found, parse as column or literal
+    // Parse as column, literal, or function call
     parse_simple_column_or_literal(input)
 }
 

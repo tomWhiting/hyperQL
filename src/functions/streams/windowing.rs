@@ -447,16 +447,22 @@ impl WindowFunction for HyperbolicWindowFunction {
             // Check if event data contains position information
             if let Value::Map(event_map) = &event.data {
                 if let Some(Value::Position(pos)) = event_map.get("position") {
-                    let distance = hyperbolic_distance(&center, pos);
-                    if distance <= radius {
-                        window_events.push(event.data.clone());
+                    match hyperbolic_distance(&center, pos) {
+                        Ok(distance) if distance <= radius => {
+                            window_events.push(event.data.clone());
+                        }
+                        Ok(_) => {}, // Distance exceeds radius
+                        Err(_) => {}, // Skip invalid positions (maintain metric consistency)
                     }
                 } else if let (Some(Value::Float(x)), Some(Value::Float(y)), Some(Value::Float(z))) =
                     (event_map.get("x"), event_map.get("y"), event_map.get("z")) {
                     let pos = Position3D { x: *x, y: *y, z: *z };
-                    let distance = hyperbolic_distance(&center, &pos);
-                    if distance <= radius {
-                        window_events.push(event.data.clone());
+                    match hyperbolic_distance(&center, &pos) {
+                        Ok(distance) if distance <= radius => {
+                            window_events.push(event.data.clone());
+                        }
+                        Ok(_) => {}, // Distance exceeds radius
+                        Err(_) => {}, // Skip invalid positions (maintain metric consistency)
                     }
                 }
             }
@@ -616,19 +622,10 @@ impl WindowFunction for SessionWindowFunction {
 // Convenience functions for window operations
 
 // Helper function for hyperbolic distance calculation
-fn hyperbolic_distance(pos1: &Position3D, pos2: &Position3D) -> f64 {
+fn hyperbolic_distance(pos1: &Position3D, pos2: &Position3D) -> Result<f64> {
     // Use the proper hyperbolic distance implementation from geometric module
-    match crate::functions::geometric::distance::hyperbolic_distance(pos1, pos2) {
-        Ok(distance) => distance,
-        Err(_) => {
-            // Fallback to Euclidean distance if positions are invalid
-            // This should rarely happen as positions should be pre-validated
-            let dx = pos1.x - pos2.x;
-            let dy = pos1.y - pos2.y;
-            let dz = pos1.z - pos2.z;
-            (dx * dx + dy * dy + dz * dz).sqrt()
-        }
-    }
+    // No fallback to maintain metric consistency
+    crate::functions::geometric::distance::hyperbolic_distance(pos1, pos2)
 }
 
 /// Create a tumbling window

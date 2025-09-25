@@ -13,7 +13,7 @@
 //! - Optimization utilities
 
 use crate::{HyperQLError, types::Position3D};
-use super::{distance, regions};
+use super::distance;
 
 /// Find all positions near a reference point within max distance
 pub fn find_near_positions(

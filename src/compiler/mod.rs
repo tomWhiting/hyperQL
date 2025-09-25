@@ -6,7 +6,6 @@
 
 use crate::ast::*;
 use crate::error::*;
-use crate::types::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

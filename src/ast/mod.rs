@@ -124,7 +124,6 @@ pub mod timeseries;
 // Core query structures
 pub use crate::types::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Root statement types in HyperQL
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
