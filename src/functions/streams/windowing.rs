@@ -617,12 +617,18 @@ impl WindowFunction for SessionWindowFunction {
 
 // Helper function for hyperbolic distance calculation
 fn hyperbolic_distance(pos1: &Position3D, pos2: &Position3D) -> f64 {
-    // Simplified hyperbolic distance calculation
-    // In a real implementation, this would use proper hyperbolic geometry
-    let dx = pos1.x - pos2.x;
-    let dy = pos1.y - pos2.y;
-    let dz = pos1.z - pos2.z;
-    (dx * dx + dy * dy + dz * dz).sqrt()
+    // Use the proper hyperbolic distance implementation from geometric module
+    match crate::functions::geometric::distance::hyperbolic_distance(pos1, pos2) {
+        Ok(distance) => distance,
+        Err(_) => {
+            // Fallback to Euclidean distance if positions are invalid
+            // This should rarely happen as positions should be pre-validated
+            let dx = pos1.x - pos2.x;
+            let dy = pos1.y - pos2.y;
+            let dz = pos1.z - pos2.z;
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        }
+    }
 }
 
 /// Create a tumbling window

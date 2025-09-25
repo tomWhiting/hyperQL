@@ -109,18 +109,32 @@ pub fn approximate_hyperbolic_distance(pos1: &Position3D, pos2: &Position3D, eps
         pos1.x, pos1.y, pos1.z, pos2.x, pos2.y, pos2.z, epsilon
     );
 
-    // TODO: Implement approximate hyperbolic distance computation
-    // This would involve:
-    // 1. Use linear approximation for small distances
-    // 2. Use cached lookup tables for common distance ranges
-    // 3. Employ series expansion for intermediate distances
-    // 4. Fall back to exact computation only when necessary
+    // For very small epsilon, use exact computation
+    if epsilon < 1e-10 {
+        return hyperbolic_distance(pos1, pos2);
+    }
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Approximate hyperbolic distance not yet implemented. {}", operation_details),
-        operation: "approximate_hyperbolic_distance".to_string(),
-        entity_context: Some("geometric_computation".to_string()),
-    })
+    // Use approximation based on Euclidean distance for nearby points
+    let dx = pos2.x - pos1.x;
+    let dy = pos2.y - pos1.y;
+    let dz = pos2.z - pos1.z;
+    let euclidean_dist_sq = dx * dx + dy * dy + dz * dz;
+
+    // If points are very close, use first-order Taylor approximation
+    if euclidean_dist_sq < 0.01 {
+        // For small distances in Poincaré ball: d_h ≈ 2 * d_e / (1 - ||x||²)
+        let euclidean_dist = euclidean_dist_sq.sqrt();
+        let norm1_sq = pos1.x * pos1.x + pos1.y * pos1.y + pos1.z * pos1.z;
+        let norm2_sq = pos2.x * pos2.x + pos2.y * pos2.y + pos2.z * pos2.z;
+        let avg_norm_sq = (norm1_sq + norm2_sq) / 2.0;
+
+        // Correction factor based on distance from origin
+        let correction = 2.0 / (1.0 - avg_norm_sq).max(0.01);
+        return Ok(euclidean_dist * correction);
+    }
+
+    // For larger distances, use full computation (already optimized)
+    hyperbolic_distance(pos1, pos2)
 }
 
 /// Compute geodesic path distance in hyperbolic space
@@ -130,19 +144,13 @@ pub fn geodesic_distance(pos1: &Position3D, pos2: &Position3D) -> Result<f64, Hy
         pos1.x, pos1.y, pos1.z, pos2.x, pos2.y, pos2.z
     );
 
-    // TODO: Implement geodesic distance computation
-    // In the Poincaré ball model, geodesics are circular arcs
-    // This would involve:
-    // 1. Find the hyperbolic line (circular arc) connecting the points
-    // 2. Compute arc length along this geodesic
-    // 3. This should be equivalent to hyperbolic_distance for shortest path
-    // 4. But allows for more geometric interpretation
+    // In the Poincaré ball model, the geodesic distance equals the hyperbolic distance
+    // Geodesics are circular arcs orthogonal to the boundary sphere
+    // The shortest path (geodesic) between two points gives the hyperbolic distance
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Geodesic distance not yet implemented. {}", operation_details),
-        operation: "geodesic_distance".to_string(),
-        entity_context: Some("geometric_computation".to_string()),
-    })
+    // This function exists for semantic clarity when working with geodesics explicitly
+    // For example, when computing paths along geodesics or studying geodesic flows
+    hyperbolic_distance(pos1, pos2)
 }
 
 /// Compute hyperbolic distance with caching for repeated calculations
@@ -152,19 +160,52 @@ pub fn cached_hyperbolic_distance(pos1: &Position3D, pos2: &Position3D, cache_ke
         pos1.x, pos1.y, pos1.z, pos2.x, pos2.y, pos2.z, cache_key
     );
 
-    // TODO: Implement cached hyperbolic distance computation
-    // This would involve:
-    // 1. Check cache for previously computed distance
-    // 2. Use cache key or generate one from positions
-    // 3. Compute distance if not in cache
-    // 4. Store result in cache for future use
-    // 5. Implement cache eviction policy for memory management
+    use std::collections::HashMap;
+    use std::sync::Mutex;
 
-    Err(HyperQLError::ExecutionError {
-        message: format!("Cached hyperbolic distance not yet implemented. {}", operation_details),
-        operation: "cached_hyperbolic_distance".to_string(),
-        entity_context: Some(cache_key.unwrap_or_else(|| "no_cache_key".to_string())),
-    })
+    lazy_static::lazy_static! {
+        static ref DISTANCE_CACHE: Mutex<HashMap<String, f64>> = Mutex::new(HashMap::new());
+    }
+
+    // Generate cache key if not provided
+    let key = cache_key.unwrap_or_else(|| {
+        format!("{:.6},{:.6},{:.6}:{:.6},{:.6},{:.6}",
+                pos1.x, pos1.y, pos1.z, pos2.x, pos2.y, pos2.z)
+    });
+
+    // Check cache first
+    {
+        let cache = DISTANCE_CACHE.lock().map_err(|_| HyperQLError::InternalError {
+            message: "Failed to acquire cache lock".to_string(),
+            component: "cached_hyperbolic_distance".to_string(),
+            debug_info: "cache_read".to_string(),
+        })?;
+
+        if let Some(&cached_distance) = cache.get(&key) {
+            return Ok(cached_distance);
+        }
+    }
+
+    // Compute distance if not in cache
+    let distance = hyperbolic_distance(pos1, pos2)?;
+
+    // Store in cache
+    {
+        let mut cache = DISTANCE_CACHE.lock().map_err(|_| HyperQLError::InternalError {
+            message: "Failed to acquire cache lock".to_string(),
+            component: "cached_hyperbolic_distance".to_string(),
+            debug_info: "cache_write".to_string(),
+        })?;
+
+        // Simple cache eviction: clear if too large
+        if cache.len() > 10000 {
+            cache.clear();
+        }
+
+        cache.insert(key, distance);
+    }
+
+    Ok(distance)
 }
 
 /// Batch compute hyperbolic distances from one point to many
@@ -243,11 +284,17 @@ mod tests {
         let pos2 = Position3D { x: 0.2, y: 0.2, z: 0.2 };
         let epsilon = 0.001;
 
-        let result = approximate_hyperbolic_distance(&pos1, &pos2, epsilon);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Approximate hyperbolic distance"));
-        assert!(error_msg.contains("epsilon=0.001000"));
+        // Test that approximate distance works and is close to exact
+        let approx_result = approximate_hyperbolic_distance(&pos1, &pos2, epsilon);
+        assert!(approx_result.is_ok());
+        let approx_dist = approx_result.unwrap();
+
+        let exact_result = hyperbolic_distance(&pos1, &pos2);
+        assert!(exact_result.is_ok());
+        let exact_dist = exact_result.unwrap();
+
+        // Approximate should be close to exact
+        assert!((approx_dist - exact_dist).abs() < 0.01);
     }
 
     #[test]
@@ -255,11 +302,17 @@ mod tests {
         let pos1 = Position3D { x: 0.0, y: 0.0, z: 0.0 }; // Origin
         let pos2 = Position3D { x: 0.5, y: 0.0, z: 0.0 }; // Along x-axis
 
-        let result = geodesic_distance(&pos1, &pos2);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Geodesic distance"));
-        assert!(error_msg.contains("not yet implemented"));
+        // Geodesic distance should equal hyperbolic distance
+        let geodesic_result = geodesic_distance(&pos1, &pos2);
+        assert!(geodesic_result.is_ok());
+        let geodesic_dist = geodesic_result.unwrap();
+
+        let hyperbolic_result = hyperbolic_distance(&pos1, &pos2);
+        assert!(hyperbolic_result.is_ok());
+        let hyperbolic_dist = hyperbolic_result.unwrap();
+
+        // They should be identical
+        assert_eq!(geodesic_dist, hyperbolic_dist);
     }
 
     #[test]
@@ -268,11 +321,22 @@ mod tests {
         let pos2 = Position3D { x: 0.4, y: 0.5, z: 0.6 };
         let cache_key = Some("test_cache_key".to_string());
 
-        let result = cached_hyperbolic_distance(&pos1, &pos2, cache_key);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Cached hyperbolic distance"));
-        assert!(error_msg.contains("cache_key"));
+        // First call should compute and cache
+        let result1 = cached_hyperbolic_distance(&pos1, &pos2, cache_key.clone());
+        assert!(result1.is_ok());
+        let dist1 = result1.unwrap();
+
+        // Second call with same key should return cached value
+        let result2 = cached_hyperbolic_distance(&pos1, &pos2, cache_key.clone());
+        assert!(result2.is_ok());
+        let dist2 = result2.unwrap();
+
+        // Both should be identical
+        assert_eq!(dist1, dist2);
+
+        // Should match hyperbolic distance
+        let exact = hyperbolic_distance(&pos1, &pos2).unwrap();
+        assert_eq!(dist1, exact);
     }
 
     #[test]
