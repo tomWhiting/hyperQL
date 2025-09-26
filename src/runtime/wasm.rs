@@ -4,7 +4,7 @@
 //! functions. It uses the Wasmtime engine for high-performance WASM execution with strong
 //! sandboxing and resource controls.
 
-use super::{RuntimeEngine, RuntimeResult, RuntimeError, RuntimeValue, RuntimeStats, RuntimeConfig};
+use super::{RuntimeEngine, RuntimeResult, RuntimeValue, RuntimeStats, RuntimeConfig};
 use std::collections::HashMap;
 
 /// WebAssembly runtime engine implementation

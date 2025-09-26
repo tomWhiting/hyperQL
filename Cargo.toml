@@ -16,3 +16,7 @@ winnow = "0.7.13"
 [[example]]
 name = "knn_demo"
 path = "examples/knn_demo.rs"
+
+[[example]]
+name = "developer_experience_demo"
+path = "examples/developer_experience_demo.rs"

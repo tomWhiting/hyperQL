@@ -171,6 +171,12 @@ pub enum HyperQLError {
         component: String,
         debug_info: String,
     },
+
+    /// Query builder errors
+    #[error("Builder error: {}", errors.join("; "))]
+    BuilderError {
+        errors: Vec<String>,
+    },
 }
 
 /// Error context for rich error reporting

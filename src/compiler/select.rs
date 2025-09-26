@@ -118,11 +118,7 @@ impl SelectCompiler {
             match item {
                 SelectItem::Wildcard => {
                     projections.push(CompiledProjection {
-                        expression: CompiledExpression::Column {
-                            table: None,
-                            name: "*".to_string(),
-                            value_type: super::ValueType::String,
-                        },
+                        expression: CompiledExpression::Literal(crate::types::Value::String("*".to_string())),
                         alias: None,
                         output_name: "*".to_string(),
                     });

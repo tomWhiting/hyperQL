@@ -4,7 +4,7 @@
 //! providing versioning, metadata storage, and efficient function lookup for both
 //! Lua and WebAssembly functions.
 
-use super::{RuntimeResult, RuntimeError};
+use super::RuntimeResult;
 use std::collections::HashMap;
 use std::time::SystemTime;
 

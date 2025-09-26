@@ -4,7 +4,7 @@
 //! functions. It uses LuaJIT for near-native performance and provides a secure sandbox for
 //! executing user code within query processing pipelines.
 
-use super::{RuntimeEngine, RuntimeResult, RuntimeError, RuntimeValue, RuntimeStats, RuntimeConfig};
+use super::{RuntimeEngine, RuntimeResult, RuntimeValue, RuntimeStats, RuntimeConfig};
 use std::collections::HashMap;
 
 /// Lua runtime engine implementation

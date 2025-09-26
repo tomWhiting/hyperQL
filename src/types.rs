@@ -179,6 +179,48 @@ pub struct QueryResult {
     pub execution_stats: ExecutionStats,
 }
 
+impl From<i64> for Value {
+    fn from(value: i64) -> Self {
+        Value::Int(value)
+    }
+}
+
+impl From<i32> for Value {
+    fn from(value: i32) -> Self {
+        Value::Int(value as i64)
+    }
+}
+
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Value::Float(value)
+    }
+}
+
+impl From<f32> for Value {
+    fn from(value: f32) -> Self {
+        Value::Float(value as f64)
+    }
+}
+
+impl From<String> for Value {
+    fn from(value: String) -> Self {
+        Value::String(value)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Value::String(value.to_string())
+    }
+}
+
+impl From<bool> for Value {
+    fn from(value: bool) -> Self {
+        Value::Bool(value)
+    }
+}
+
 /// Query execution statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionStats {

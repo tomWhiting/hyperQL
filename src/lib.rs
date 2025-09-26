@@ -101,6 +101,11 @@ pub mod context;
 pub mod runtime;
 pub mod ir;
 
+// Developer experience modules
+pub mod builder;
+pub mod documentation;
+pub mod utils;
+
 // Re-export commonly used types
 pub use error::{HyperQLError, Result};
 pub use types::*;
@@ -111,6 +116,11 @@ pub use parser::parse_statement;
 pub use compiler::{Compiler, CompiledQuery};
 pub use executor::{Executor, MemoryDataSource};
 pub use type_checker::{TypeChecker, TypeInfo, TypeContext};
+
+// Re-export developer experience features
+pub use builder::HyperQLBuilder;
+pub use documentation::{HyperQLSyntax, HyperQLExamples};
+pub use utils::query_utils;
 
 #[cfg(test)]
 mod integration_tests {
