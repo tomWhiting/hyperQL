@@ -4,6 +4,8 @@ use crate::error::Result;
 use super::{DataSource, StatsCollector};
 use super::expression_eval::ExpressionEvaluator;
 use super::aggregation::AggregationEngine;
+use super::geometric::GeometricEngine;
+use super::vector::VectorEngine;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -12,6 +14,8 @@ pub struct PlanExecutor {
     stats_collector: StatsCollector,
     expression_evaluator: ExpressionEvaluator,
     aggregation_engine: AggregationEngine,
+    geometric_engine: GeometricEngine,
+    vector_engine: VectorEngine,
 }
 
 impl PlanExecutor {
@@ -21,6 +25,8 @@ impl PlanExecutor {
             stats_collector: StatsCollector::new(),
             expression_evaluator: ExpressionEvaluator::new(),
             aggregation_engine: AggregationEngine::new(),
+            geometric_engine: GeometricEngine::new(),
+            vector_engine: VectorEngine::new(),
         }
     }
 
@@ -269,44 +275,131 @@ impl PlanExecutor {
     }
 
     fn execute_traverse(&mut self, patterns: &[CompiledTraversePattern]) -> Result<Vec<ResultRow>> {
-        let mut result_rows = Vec::new();
-        
-        for pattern in patterns {
-            self.stats_collector.relationships_traversed += 1;
-            
-            let mut row_columns = HashMap::new();
-            if let Some(ref start_var) = pattern.start_node.variable {
-                row_columns.insert(start_var.clone(), Value::String("start_entity".to_string()));
-            }
-            if let Some(ref end_var) = pattern.end_node.variable {
-                row_columns.insert(end_var.clone(), Value::String("end_entity".to_string()));
-            }
-            if let Some(ref rel_var) = pattern.relationship.variable {
-                row_columns.insert(rel_var.clone(), Value::String("relationship".to_string()));
-            }
-            
-            result_rows.push(ResultRow { columns: row_columns });
+        if patterns.is_empty() {
+            return Ok(vec![]);
         }
-        
+
+        let mut result_rows = Vec::new();
+
+        for pattern in patterns {
+            let start_label = pattern.start_node.label.as_deref();
+            let end_label = pattern.end_node.label.as_deref();
+            let rel_type = pattern.relationship.rel_type.as_deref();
+
+            let start_entities = if let Some(label) = start_label {
+                self.data_source.scan(label)?
+            } else {
+                vec![]
+            };
+
+            for start_entity in &start_entities {
+                let relationships = self.find_relationships(&start_entity.id, rel_type, &pattern.relationship.direction)?;
+
+                for relationship in relationships {
+                    let end_entity_result = self.data_source.scan(end_label.unwrap_or("entities"));
+
+                    if let Ok(end_entities) = end_entity_result {
+                        for end_entity in end_entities {
+                            if end_entity.id == relationship.to_entity {
+                                self.stats_collector.relationships_traversed += 1;
+
+                                let mut row_columns = HashMap::new();
+
+                                if let Some(ref start_var) = pattern.start_node.variable {
+                                    row_columns.insert(start_var.clone(), Value::EntityId(start_entity.id.clone()));
+                                    row_columns.insert(format!("{}_id", start_var), Value::String(start_entity.id.0.clone()));
+                                }
+
+                                if let Some(ref end_var) = pattern.end_node.variable {
+                                    row_columns.insert(end_var.clone(), Value::EntityId(end_entity.id.clone()));
+                                    row_columns.insert(format!("{}_id", end_var), Value::String(end_entity.id.0.clone()));
+                                }
+
+                                if let Some(ref rel_var) = pattern.relationship.variable {
+                                    row_columns.insert(rel_var.clone(), Value::String(relationship.rel_type.0.clone()));
+                                }
+
+                                result_rows.push(ResultRow { columns: row_columns });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(result_rows)
     }
 
-    fn execute_geometric_operation(&mut self, op_type: &crate::compiler::GeometricOpType, _params: &HashMap<String, CompiledExpression>, _input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
-        self.stats_collector.hyperbolic_operations += 1;
-        
-        let mut row_columns = HashMap::new();
-        row_columns.insert("operation".to_string(), Value::String(format!("{:?}", op_type)));
-        row_columns.insert("result".to_string(), Value::Float(1.0));
-        
-        Ok(vec![ResultRow { columns: row_columns }])
+    fn find_relationships(
+        &self,
+        from_entity_id: &crate::types::EntityId,
+        rel_type: Option<&str>,
+        direction: &crate::ast::RelationshipDirection,
+    ) -> Result<Vec<crate::types::Relationship>> {
+        let relationships_table = "relationships";
+        let all_entities = self.data_source.scan(relationships_table)?;
+
+        let mut relationships = Vec::new();
+
+        for entity in all_entities {
+            let from_id = entity.properties.get(&crate::types::PropertyName("from_id".to_string()));
+            let to_id = entity.properties.get(&crate::types::PropertyName("to_id".to_string()));
+            let r_type = entity.properties.get(&crate::types::PropertyName("type".to_string()));
+
+            if let (Some(Value::String(from)), Some(Value::String(to)), Some(Value::String(rtype))) = (from_id, to_id, r_type) {
+                let matches_direction = match direction {
+                    crate::ast::RelationshipDirection::Outgoing => from == &from_entity_id.0,
+                    crate::ast::RelationshipDirection::Incoming => to == &from_entity_id.0,
+                    crate::ast::RelationshipDirection::Undirected => from == &from_entity_id.0 || to == &from_entity_id.0,
+                };
+
+                let matches_type = rel_type.map_or(true, |rt| rt == rtype);
+
+                if matches_direction && matches_type {
+                    relationships.push(crate::types::Relationship {
+                        id: Some(entity.id.clone()),
+                        from_entity: crate::types::EntityId(from.clone()),
+                        to_entity: crate::types::EntityId(to.clone()),
+                        rel_type: crate::types::RelationType(rtype.clone()),
+                        properties: entity.properties.clone(),
+                    });
+                }
+            }
+        }
+
+        Ok(relationships)
     }
 
-    fn execute_vector_operation(&mut self, op_type: &crate::compiler::VectorOpType, _params: &HashMap<String, CompiledExpression>, _input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
-        let mut row_columns = HashMap::new();
-        row_columns.insert("operation".to_string(), Value::String(format!("{:?}", op_type)));
-        row_columns.insert("similarity".to_string(), Value::Float(0.85));
-        
-        Ok(vec![ResultRow { columns: row_columns }])
+    fn execute_geometric_operation(&mut self, op_type: &crate::compiler::GeometricOpType, params: &HashMap<String, CompiledExpression>, input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
+        self.stats_collector.hyperbolic_operations += 1;
+
+        let input_rows = if let Some(plan) = input {
+            self.execute_plan(plan)?
+        } else {
+            vec![]
+        };
+
+        self.geometric_engine.execute_operation(
+            op_type,
+            params,
+            input_rows,
+            &mut self.expression_evaluator,
+        )
+    }
+
+    fn execute_vector_operation(&mut self, op_type: &crate::compiler::VectorOpType, params: &HashMap<String, CompiledExpression>, input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
+        let input_rows = if let Some(plan) = input {
+            self.execute_plan(plan)?
+        } else {
+            vec![]
+        };
+
+        self.vector_engine.execute_operation(
+            op_type,
+            params,
+            input_rows,
+            &mut self.expression_evaluator,
+        )
     }
 
     fn execute_stream_operation(&mut self, op_type: &crate::compiler::StreamOpType, _params: &HashMap<String, CompiledExpression>, _input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
@@ -326,7 +419,9 @@ impl PlanExecutor {
     fn execute_graph_operation(&mut self, op_type: &crate::compiler::GraphOpType, _params: &HashMap<String, CompiledExpression>, _input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
         let mut row_columns = HashMap::new();
         row_columns.insert("operation".to_string(), Value::String(format!("{:?}", op_type)));
-        
+        row_columns.insert("status".to_string(), Value::String("Graph engine integration pending".to_string()));
+        row_columns.insert("note".to_string(), Value::String("Full graph operations require Hyperspatial graph engine integration".to_string()));
+
         Ok(vec![ResultRow { columns: row_columns }])
     }
 }

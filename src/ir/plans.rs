@@ -4,9 +4,9 @@
 //! including logical and physical plan representations, cost-based optimization, and
 //! execution strategy selection optimized for hyperbolic space operations.
 
-use super::{IRResult, IRError, NodeId};
+use super::{IRResult, NodeId};
 use super::operators::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use crate::types::Position3D;
 

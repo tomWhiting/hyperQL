@@ -17,6 +17,8 @@ mod plan_executor;
 mod expression_eval;
 mod aggregation;
 mod data_source;
+mod geometric;
+mod vector;
 
 use crate::compiler::{CompiledExpression, CompiledAssignment};
 use crate::types::Entity;

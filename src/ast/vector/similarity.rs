@@ -129,7 +129,7 @@ impl SimilarityExpressionNode {
     /// Set the similarity threshold for filtering
     pub fn set_threshold(&mut self, threshold: SimilarityThreshold) -> Result<(), HyperQLError> {
         if let Some(min_score) = threshold.min_score {
-            if min_score < -1.0 || min_score > 1.0 {
+            if !(-1.0..=1.0).contains(&min_score) {
                 return Err(HyperQLError::ValidationError {
                     message: "Similarity threshold must be between -1.0 and 1.0".to_string(),
                     field: Some("min_score".to_string()),

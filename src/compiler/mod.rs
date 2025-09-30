@@ -409,10 +409,94 @@ impl Compiler {
 
 
 
+    /// Compile a statement with query optimization
+    pub fn compile_with_optimizer(
+        &self,
+        statement: Statement,
+        optimizer: &crate::optimizer::QueryOptimizer
+    ) -> Result<CompiledQuery> {
+        let compiled = self.compile(statement)?;
 
+        // Apply optimizations to the execution plan
+        let optimized_plan = optimizer.optimize(compiled.plan)?;
 
+        // Recalculate metadata and cost estimates for the optimized plan
+        let optimized_metadata = self.metadata_generator.generate_metadata(&optimized_plan);
+        let optimized_cost = self.cost_estimator.estimate_cost(&optimized_plan);
 
+        Ok(CompiledQuery {
+            plan: optimized_plan,
+            metadata: optimized_metadata,
+            estimated_cost: optimized_cost,
+        })
+    }
 
+    /// Compile with optimizer and return optimization statistics
+    pub fn compile_with_optimizer_stats(
+        &self,
+        statement: Statement,
+        optimizer: &crate::optimizer::QueryOptimizer
+    ) -> Result<(CompiledQuery, crate::optimizer::OptimizationStats)> {
+        let compiled = self.compile(statement)?;
+
+        // Apply optimizations with statistics tracking
+        let (optimized_plan, stats) = optimizer.optimize_with_stats(compiled.plan)?;
+
+        // Recalculate metadata and cost estimates for the optimized plan
+        let optimized_metadata = self.metadata_generator.generate_metadata(&optimized_plan);
+        let optimized_cost = self.cost_estimator.estimate_cost(&optimized_plan);
+
+        let optimized_query = CompiledQuery {
+            plan: optimized_plan,
+            metadata: optimized_metadata,
+            estimated_cost: optimized_cost,
+        };
+
+        Ok((optimized_query, stats))
+    }
+
+    /// Compile a statement with validation
+    pub fn compile_with_validation(
+        &self,
+        statement: Statement,
+        validator: &mut crate::validator::QueryValidator,
+    ) -> Result<CompiledQuery> {
+        // Validate first
+        let validation_result = validator.validate(&statement)?;
+
+        if !validation_result.valid {
+            return Err(HyperQLError::ValidationError {
+                message: format!("Query validation failed with {} errors", validation_result.errors.len()),
+                field: None,
+            });
+        }
+
+        // If validation passes, compile normally
+        self.compile(statement)
+    }
+
+    /// Compile with both validation and optimization
+    pub fn compile_with_validation_and_optimization(
+        &self,
+        statement: Statement,
+        validator: &mut crate::validator::QueryValidator,
+        optimizer: &crate::optimizer::QueryOptimizer,
+    ) -> Result<(CompiledQuery, crate::validator::ValidationResult, crate::optimizer::OptimizationStats)> {
+        // Validate first
+        let validation_result = validator.validate(&statement)?;
+
+        if !validation_result.valid {
+            return Err(HyperQLError::ValidationError {
+                message: format!("Query validation failed with {} errors", validation_result.errors.len()),
+                field: None,
+            });
+        }
+
+        // Compile and optimize
+        let (compiled_query, optimization_stats) = self.compile_with_optimizer_stats(statement, optimizer)?;
+
+        Ok((compiled_query, validation_result, optimization_stats))
+    }
 }
 
 

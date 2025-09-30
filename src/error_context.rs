@@ -663,7 +663,7 @@ mod tests {
     
     #[test]
     fn test_color_detection() {
-        let formatter = ErrorFormatter::new();
+        let _formatter = ErrorFormatter::new();
         // Just test that it creates without panicking
         assert!(true);
     }

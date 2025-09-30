@@ -462,7 +462,6 @@ pub mod query_utils {
 #[cfg(test)]
 mod tests {
     use super::query_utils::*;
-    use crate::types::Value;
     use crate::ast::vector::similarity::SimilarityMetric;
 
     #[test]

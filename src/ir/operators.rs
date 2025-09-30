@@ -4,9 +4,8 @@
 //! for executing HyperQL queries in hyperbolic space. Each operator is optimized for
 //! efficient execution while maintaining the semantic richness of the HyperQL language.
 
-use super::{IRResult, IRError, NodeId};
+use super::{IRResult, NodeId};
 use std::collections::HashMap;
-use std::sync::Arc;
 use crate::types::Position3D;
 
 /// Base trait for all IR operators

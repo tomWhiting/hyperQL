@@ -466,7 +466,7 @@ mod tests {
     fn test_index_recommendation() {
         let reference = Expression::Literal(Literal::String("ref".to_string()));
 
-        let small_exact = KNNQueryNode::new_with_config(
+        let _small_exact = KNNQueryNode::new_with_config(
             "vec1".to_string(),
             reference.clone(),
             5,

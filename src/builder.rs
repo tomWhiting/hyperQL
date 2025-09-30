@@ -259,7 +259,7 @@ impl HyperQLBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{EntityId, Value};
+    use crate::types::Value;
 
     #[test]
     fn test_basic_select_construction() {

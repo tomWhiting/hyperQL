@@ -4,6 +4,7 @@ use crate::error::Result;
 use super::{DataSource, TableSchema, ColumnType};
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct MemoryDataSource {
     entities: HashMap<String, Vec<Entity>>,
 }
