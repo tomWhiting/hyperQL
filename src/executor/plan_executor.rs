@@ -16,6 +16,8 @@ pub struct PlanExecutor {
     aggregation_engine: AggregationEngine,
     geometric_engine: GeometricEngine,
     vector_engine: VectorEngine,
+    global_index: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+    hnsw: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl PlanExecutor {
@@ -27,6 +29,25 @@ impl PlanExecutor {
             aggregation_engine: AggregationEngine::new(),
             geometric_engine: GeometricEngine::new(),
             vector_engine: VectorEngine::new(),
+            global_index: None,
+            hnsw: None,
+        }
+    }
+
+    pub fn with_indices(
+        data_source: Box<dyn DataSource>,
+        global_index: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        hnsw: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+    ) -> Self {
+        Self {
+            data_source,
+            stats_collector: StatsCollector::new(),
+            expression_evaluator: ExpressionEvaluator::new(),
+            aggregation_engine: AggregationEngine::new(),
+            geometric_engine: GeometricEngine::new(),
+            vector_engine: VectorEngine::new(),
+            global_index: Some(global_index),
+            hnsw,
         }
     }
 
@@ -312,7 +333,6 @@ impl PlanExecutor {
 
         for pattern in patterns {
             let start_label = pattern.start_node.label.as_deref();
-            let end_label = pattern.end_node.label.as_deref();
             let rel_type = pattern.relationship.rel_type.as_deref();
 
             let start_entities = if let Some(label) = start_label {
@@ -322,35 +342,81 @@ impl PlanExecutor {
             };
 
             for start_entity in &start_entities {
-                let relationships = self.find_relationships(&start_entity.id, rel_type, &pattern.relationship.direction)?;
+                if let Some(ref start_constraint) = pattern.start_node.properties {
+                    if !self.expression_evaluator.evaluate_predicate(start_constraint, &self.entity_to_row(start_entity))? {
+                        continue;
+                    }
+                }
 
-                for relationship in relationships {
-                    let end_entity_result = self.data_source.scan(end_label.unwrap_or("entities"));
+                let (min_hops, max_hops) = if let Some(ref var_length) = pattern.relationship.variable_length {
+                    let min = var_length.min_hops.unwrap_or(1) as usize;
+                    let max = var_length.max_hops.unwrap_or(min as u32) as usize;
+                    (min, max)
+                } else {
+                    (1, 1)
+                };
 
-                    if let Ok(end_entities) = end_entity_result {
-                        for end_entity in end_entities {
-                            if end_entity.id == relationship.to_entity {
-                                self.stats_collector.relationships_traversed += 1;
+                let traversal_results = self.data_source.traverse_graph(&start_entity.id, max_hops, rel_type)?;
 
-                                let mut row_columns = HashMap::new();
+                let mut matched_end_entities = Vec::new();
 
-                                if let Some(ref start_var) = pattern.start_node.variable {
-                                    row_columns.insert(start_var.clone(), Value::EntityId(start_entity.id.clone()));
-                                    row_columns.insert(format!("{}_id", start_var), Value::String(start_entity.id.0.clone()));
-                                }
+                for (end_entity, depth) in traversal_results {
+                    if depth < min_hops || depth > max_hops {
+                        continue;
+                    }
 
-                                if let Some(ref end_var) = pattern.end_node.variable {
-                                    row_columns.insert(end_var.clone(), Value::EntityId(end_entity.id.clone()));
-                                    row_columns.insert(format!("{}_id", end_var), Value::String(end_entity.id.0.clone()));
-                                }
+                    if depth == 0 {
+                        continue;
+                    }
 
-                                if let Some(ref rel_var) = pattern.relationship.variable {
-                                    row_columns.insert(rel_var.clone(), Value::String(relationship.rel_type.0.clone()));
-                                }
-
-                                result_rows.push(ResultRow { columns: row_columns });
-                            }
+                    if let Some(ref end_constraint) = pattern.end_node.properties {
+                        if !self.expression_evaluator.evaluate_predicate(end_constraint, &self.entity_to_row(&end_entity))? {
+                            continue;
                         }
+                    }
+
+                    matched_end_entities.push((end_entity, depth));
+                }
+
+                if matched_end_entities.is_empty() && pattern.relationship.optional {
+                    let mut row_columns = HashMap::new();
+
+                    if let Some(ref start_var) = pattern.start_node.variable {
+                        row_columns.insert(start_var.clone(), Value::EntityId(start_entity.id.clone()));
+                        row_columns.insert(format!("{}_id", start_var), Value::String(start_entity.id.0.clone()));
+                    }
+
+                    if let Some(ref end_var) = pattern.end_node.variable {
+                        row_columns.insert(end_var.clone(), Value::Null);
+                        row_columns.insert(format!("{}_id", end_var), Value::Null);
+                    }
+
+                    if let Some(ref rel_var) = pattern.relationship.variable {
+                        row_columns.insert(rel_var.clone(), Value::Null);
+                    }
+
+                    result_rows.push(ResultRow { columns: row_columns });
+                } else {
+                    for (end_entity, depth) in matched_end_entities {
+                        self.stats_collector.relationships_traversed += depth as u64;
+
+                        let mut row_columns = HashMap::new();
+
+                        if let Some(ref start_var) = pattern.start_node.variable {
+                            row_columns.insert(start_var.clone(), Value::EntityId(start_entity.id.clone()));
+                            row_columns.insert(format!("{}_id", start_var), Value::String(start_entity.id.0.clone()));
+                        }
+
+                        if let Some(ref end_var) = pattern.end_node.variable {
+                            row_columns.insert(end_var.clone(), Value::EntityId(end_entity.id.clone()));
+                            row_columns.insert(format!("{}_id", end_var), Value::String(end_entity.id.0.clone()));
+                        }
+
+                        if let Some(ref rel_var) = pattern.relationship.variable {
+                            row_columns.insert(rel_var.clone(), Value::String(format!("path_depth_{}", depth)));
+                        }
+
+                        result_rows.push(ResultRow { columns: row_columns });
                     }
                 }
             }
@@ -359,44 +425,21 @@ impl PlanExecutor {
         Ok(result_rows)
     }
 
-    fn find_relationships(
-        &self,
-        from_entity_id: &crate::types::EntityId,
-        rel_type: Option<&str>,
-        direction: &crate::ast::RelationshipDirection,
-    ) -> Result<Vec<crate::types::Relationship>> {
-        let relationships_table = "relationships";
-        let all_entities = self.data_source.scan(relationships_table)?;
+    fn entity_to_row(&self, entity: &crate::types::Entity) -> ResultRow {
+        let mut columns = HashMap::new();
+        columns.insert("id".to_string(), Value::String(entity.id.0.clone()));
 
-        let mut relationships = Vec::new();
-
-        for entity in all_entities {
-            let from_id = entity.properties.get(&crate::types::PropertyName("from_id".to_string()));
-            let to_id = entity.properties.get(&crate::types::PropertyName("to_id".to_string()));
-            let r_type = entity.properties.get(&crate::types::PropertyName("type".to_string()));
-
-            if let (Some(Value::String(from)), Some(Value::String(to)), Some(Value::String(rtype))) = (from_id, to_id, r_type) {
-                let matches_direction = match direction {
-                    crate::ast::RelationshipDirection::Outgoing => from == &from_entity_id.0,
-                    crate::ast::RelationshipDirection::Incoming => to == &from_entity_id.0,
-                    crate::ast::RelationshipDirection::Undirected => from == &from_entity_id.0 || to == &from_entity_id.0,
-                };
-
-                let matches_type = rel_type.map_or(true, |rt| rt == rtype);
-
-                if matches_direction && matches_type {
-                    relationships.push(crate::types::Relationship {
-                        id: Some(entity.id.clone()),
-                        from_entity: crate::types::EntityId(from.clone()),
-                        to_entity: crate::types::EntityId(to.clone()),
-                        rel_type: crate::types::RelationType(rtype.clone()),
-                        properties: entity.properties.clone(),
-                    });
-                }
-            }
+        if let Some(ref position) = entity.position {
+            columns.insert("x".to_string(), Value::Float(position.x));
+            columns.insert("y".to_string(), Value::Float(position.y));
+            columns.insert("z".to_string(), Value::Float(position.z));
         }
 
-        Ok(relationships)
+        for (prop_name, prop_value) in &entity.properties {
+            columns.insert(prop_name.0.clone(), prop_value.clone());
+        }
+
+        ResultRow { columns }
     }
 
     fn execute_geometric_operation(&mut self, op_type: &crate::compiler::GeometricOpType, params: &HashMap<String, CompiledExpression>, input: Option<&ExecutionPlan>) -> Result<Vec<ResultRow>> {
@@ -413,6 +456,8 @@ impl PlanExecutor {
             params,
             input_rows,
             &mut self.expression_evaluator,
+            self.global_index.as_ref(),
+            self.hnsw.as_ref(),
         )
     }
 

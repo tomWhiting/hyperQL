@@ -1,9 +1,15 @@
 use crate::ast::*;
 use crate::error::*;
-use super::utils;
+use super::{utils, geometric};
 
 pub fn parse_simple_expression(input: &str) -> Result<Expression> {
     let input = input.trim();
+
+    // Check for geometric expressions first (NEAR/WITHIN)
+    let upper_input = input.to_uppercase();
+    if upper_input.contains(" NEAR ") && upper_input.contains(" WITHIN ") {
+        return geometric::parse_near_expression(input);
+    }
 
     if let Some(and_pos) = utils::find_operator_position(input, " AND ") {
         let left = parse_simple_expression(&input[..and_pos])?;

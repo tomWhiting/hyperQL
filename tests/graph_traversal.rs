@@ -60,8 +60,10 @@ fn test_basic_graph_traversal() {
     let mut executor = executor::Executor::new(Box::new(data_source));
     let result = executor.execute(compiled).expect("Failed to execute query");
 
-    assert!(result.rows.len() <= 1, "Should return at most one relationship");
-    assert!(result.execution_stats.relationships_traversed <= 1, "Should traverse at most one relationship");
+    // The traversal is bidirectional by default, so both User entities will find each other
+    // user1 -> user2 and user2 -> user1 (via the same relationship)
+    assert_eq!(result.rows.len(), 2, "Should return 2 paths (bidirectional traversal)");
+    assert!(result.execution_stats.relationships_traversed >= 2, "Should traverse at least 2 relationship paths");
 }
 
 #[test]

@@ -63,11 +63,74 @@ impl DataSource for MemoryDataSource {
         columns.insert("x".to_string(), ColumnType::Float);
         columns.insert("y".to_string(), ColumnType::Float);
         columns.insert("z".to_string(), ColumnType::Float);
-        
+
         Ok(TableSchema {
             name: table.to_string(),
             columns,
         })
+    }
+
+    fn traverse_graph(
+        &self,
+        start_entity_id: &crate::types::EntityId,
+        max_depth: usize,
+        edge_type_filter: Option<&str>,
+    ) -> Result<Vec<(Entity, usize)>> {
+        use std::collections::{HashSet, VecDeque};
+        use crate::types::{PropertyName, Value};
+
+        let mut results = Vec::new();
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+
+        queue.push_back((start_entity_id.clone(), 0));
+        visited.insert(start_entity_id.clone());
+
+        let relationships = self.entities.get("relationships").cloned().unwrap_or_default();
+
+        while let Some((current_id, depth)) = queue.pop_front() {
+            if depth > max_depth {
+                continue;
+            }
+
+            for (_table_name, table_entities) in &self.entities {
+                if let Some(entity) = table_entities.iter().find(|e| e.id == current_id) {
+                    results.push((entity.clone(), depth));
+                    break;
+                }
+            }
+
+            if depth < max_depth {
+                for rel_entity in &relationships {
+                    let from_id = rel_entity.properties.get(&PropertyName("from_id".to_string()));
+                    let to_id = rel_entity.properties.get(&PropertyName("to_id".to_string()));
+                    let rel_type = rel_entity.properties.get(&PropertyName("type".to_string()));
+
+                    if let (Some(Value::String(from)), Some(Value::String(to)), Some(Value::String(rtype))) = (from_id, to_id, rel_type) {
+                        if edge_type_filter.is_some() && edge_type_filter != Some(rtype.as_str()) {
+                            continue;
+                        }
+
+                        let next_id = if from == &current_id.0 {
+                            Some(crate::types::EntityId(to.clone()))
+                        } else if to == &current_id.0 {
+                            Some(crate::types::EntityId(from.clone()))
+                        } else {
+                            None
+                        };
+
+                        if let Some(next) = next_id {
+                            if !visited.contains(&next) {
+                                visited.insert(next.clone());
+                                queue.push_back((next, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(results)
     }
 }
 

@@ -45,6 +45,27 @@ pub trait DataSource: Send + Sync {
 
     /// Get schema information for a table
     fn get_schema(&self, table: &str) -> Result<TableSchema>;
+
+    /// Traverse graph from start entity up to max depth
+    ///
+    /// Returns entities reachable from start entity with their depth (hop count).
+    /// Depth 0 = start entity itself, depth 1 = direct neighbors, etc.
+    ///
+    /// # Parameters
+    ///
+    /// * `start_entity_id` - ID of entity to start traversal from
+    /// * `max_depth` - Maximum number of hops from start (0 = start only)
+    /// * `edge_type_filter` - Optional edge type filter (None = all edge types)
+    ///
+    /// # Returns
+    ///
+    /// Vector of (Entity, depth) tuples for all reachable entities up to max_depth
+    fn traverse_graph(
+        &self,
+        start_entity_id: &crate::types::EntityId,
+        max_depth: usize,
+        edge_type_filter: Option<&str>,
+    ) -> Result<Vec<(Entity, usize)>>;
 }
 
 /// Table schema definition

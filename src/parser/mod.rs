@@ -20,7 +20,11 @@ mod expression;
 mod clause;
 mod traverse;
 mod utils;
+mod geometric;
 
 
 /// Parse a complete HyperQL statement
 pub use statement::parse_statement;
+
+/// Parse geometric expressions (NEAR, WITHIN, DISTANCE)
+pub use geometric::{parse_near_expression, parse_distance_expression};

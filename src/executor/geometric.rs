@@ -6,12 +6,14 @@ use std::collections::HashMap;
 
 pub struct GeometricEngine {
     default_curvature: f64,
+    default_weights: [f32; 3],
 }
 
 impl GeometricEngine {
     pub fn new() -> Self {
         Self {
             default_curvature: 1.0,
+            default_weights: [0.4, 0.4, 0.2],
         }
     }
 
@@ -19,6 +21,7 @@ impl GeometricEngine {
     pub fn new_with_curvature(curvature: f64) -> Self {
         Self {
             default_curvature: curvature,
+            default_weights: [0.4, 0.4, 0.2],
         }
     }
 
@@ -28,6 +31,8 @@ impl GeometricEngine {
         params: &HashMap<String, CompiledExpression>,
         input_rows: Vec<ResultRow>,
         evaluator: &mut ExpressionEvaluator,
+        _global_index: Option<&std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+        _hnsw: Option<&std::sync::Arc<dyn std::any::Any + Send + Sync>>,
     ) -> Result<Vec<ResultRow>> {
         match op_type {
             GeometricOpType::HyperbolicDistance => {
