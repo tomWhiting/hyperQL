@@ -49,7 +49,7 @@ fn demo_constant_folding(compiler: &Compiler, optimizer: &QueryOptimizer) {
     println!("\nOptimizations Applied: {:?}", stats);
     
     println!("\n💡 The constants '20 + 5' and '50.0 * 1.5' should be folded to '25' and '75.0'");
-    println!("-" * 60);
+    println!("{}", "-".repeat(60));
 }
 
 fn demo_predicate_pushdown(compiler: &Compiler, optimizer: &QueryOptimizer) {
@@ -68,7 +68,7 @@ fn demo_predicate_pushdown(compiler: &Compiler, optimizer: &QueryOptimizer) {
     println!("\nOptimizations Applied: {:?}", stats);
     
     println!("\n💡 The WHERE filter should be pushed down closer to the data source");
-    println!("-" * 60);
+    println!("{}", "-".repeat(60));
 }
 
 fn demo_expression_simplification(compiler: &Compiler, optimizer: &QueryOptimizer) {
@@ -87,7 +87,7 @@ fn demo_expression_simplification(compiler: &Compiler, optimizer: &QueryOptimize
     println!("\nOptimizations Applied: {:?}", stats);
     
     println!("\n💡 The duplicate 'age > 20' conditions should be simplified to a single condition");
-    println!("-" * 60);
+    println!("{}", "-".repeat(60));
 }
 
 fn demo_multi_optimization(compiler: &Compiler, optimizer: &QueryOptimizer) {
@@ -125,7 +125,7 @@ fn demo_multi_optimization(compiler: &Compiler, optimizer: &QueryOptimizer) {
     println!("   - Constants folded: '10 + 15' → '25', '30 + 40' → '70'");
     println!("   - Predicates pushed down to scan level");
     println!("   - Unnecessary projections eliminated");
-    println!("-" * 60);
+    println!("{}", "-".repeat(60));
 }
 
 // Utility function for drawing separator lines

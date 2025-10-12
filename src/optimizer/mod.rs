@@ -353,13 +353,13 @@ fn plans_equivalent(plan1: &ExecutionPlan, plan2: &ExecutionPlan) -> bool {
             t1 == t2 && expressions_equivalent(f1.as_ref(), f2.as_ref()) &&
             p1.len() == p2.len()
         }
-        (ExecutionPlan::Filter { predicate: p1, .. },
-         ExecutionPlan::Filter { predicate: p2, .. }) => {
-            expressions_equivalent(Some(p1), Some(p2))
+        (ExecutionPlan::Filter { input: i1, predicate: p1 },
+         ExecutionPlan::Filter { input: i2, predicate: p2 }) => {
+            plans_equivalent(i1, i2) && expressions_equivalent(Some(p1), Some(p2))
         }
-        (ExecutionPlan::Project { expressions: e1, .. },
-         ExecutionPlan::Project { expressions: e2, .. }) => {
-            e1.len() == e2.len()
+        (ExecutionPlan::Project { input: i1, expressions: e1 },
+         ExecutionPlan::Project { input: i2, expressions: e2 }) => {
+            plans_equivalent(i1, i2) && e1.len() == e2.len()
         }
         _ => mem::discriminant(plan1) == mem::discriminant(plan2)
     }

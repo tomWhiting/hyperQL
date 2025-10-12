@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 /// WebAssembly runtime engine implementation
 pub struct WasmRuntime {
+    #[allow(dead_code)]
     config: RuntimeConfig,
     stats: RuntimeStats,
     modules: HashMap<String, WasmModule>, // function_name -> compiled_module
@@ -16,6 +17,7 @@ pub struct WasmRuntime {
 
 /// Compiled WASM module with metadata
 #[derive(Debug)]
+#[allow(dead_code)]
 struct WasmModule {
     /// Compiled WASM module bytecode
     bytecode: Vec<u8>,
@@ -47,6 +49,7 @@ pub enum WasmType {
 
 /// Module compilation metadata
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ModuleMetadata {
     /// Module compilation timestamp
     compiled_at: std::time::SystemTime,
@@ -58,6 +61,7 @@ struct ModuleMetadata {
     memory_estimate: usize,
 }
 
+#[allow(dead_code)]
 impl WasmRuntime {
     /// Create a new WASM runtime with the given configuration
     pub fn new(config: RuntimeConfig) -> RuntimeResult<Self> {
@@ -79,7 +83,7 @@ impl WasmRuntime {
     }
     
     /// Compile WASM module from source
-    pub fn compile_module(&mut self, name: &str, wasm_bytes: &[u8]) -> RuntimeResult<()> {
+    pub fn compile_module(&mut self, name: &str, _wasm_bytes: &[u8]) -> RuntimeResult<()> {
         // TODO: Validate WASM module format
         // TODO: Check for security violations (no file I/O, network, etc.)
         // TODO: Compile module with Wasmtime
@@ -110,7 +114,7 @@ impl WasmRuntime {
     }
     
     /// Validate function signature compatibility
-    fn validate_signature(&self, name: &str, args: &[RuntimeValue]) -> RuntimeResult<()> {
+    fn validate_signature(&self, name: &str, _args: &[RuntimeValue]) -> RuntimeResult<()> {
         // TODO: Look up function signature
         // TODO: Check argument count and types
         // TODO: Validate return type expectations
@@ -120,7 +124,7 @@ impl WasmRuntime {
 }
 
 impl RuntimeEngine for WasmRuntime {
-    fn execute(&mut self, function_name: &str, args: &[RuntimeValue]) -> RuntimeResult<RuntimeValue> {
+    fn execute(&mut self, function_name: &str, _args: &[RuntimeValue]) -> RuntimeResult<RuntimeValue> {
         // TODO: Look up compiled module
         // TODO: Validate function signature
         // TODO: Convert RuntimeValue args to WASM types
@@ -132,7 +136,7 @@ impl RuntimeEngine for WasmRuntime {
         todo!("Execute WASM function: {}", function_name)
     }
     
-    fn load_function(&mut self, name: &str, code: &str) -> RuntimeResult<()> {
+    fn load_function(&mut self, name: &str, _code: &str) -> RuntimeResult<()> {
         // For WASM, code should be base64-encoded WASM bytecode
         // TODO: Decode base64 WASM bytecode
         // TODO: Compile and validate WASM module

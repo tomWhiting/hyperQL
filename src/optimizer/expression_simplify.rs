@@ -262,7 +262,12 @@ impl ExpressionSimplifyOptimizer {
                     result_type,
                 }
             }
-            
+
+            // General AND deduplication: flatten and deduplicate conditions
+            (_, BinaryOperator::And, _) => {
+                self.try_combine_and_conditions(left.clone(), right.clone(), result_type)
+            }
+
             _ => {
                 CompiledExpression::Binary {
                     left: Box::new(left),

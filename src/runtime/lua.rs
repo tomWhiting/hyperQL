@@ -9,11 +9,13 @@ use std::collections::HashMap;
 
 /// Lua runtime engine implementation
 pub struct LuaRuntime {
+    #[allow(dead_code)]
     config: RuntimeConfig,
     stats: RuntimeStats,
     functions: HashMap<String, String>, // function_name -> lua_code
 }
 
+#[allow(dead_code)]
 impl LuaRuntime {
     /// Create a new Lua runtime with the given configuration
     pub fn new(config: RuntimeConfig) -> RuntimeResult<Self> {
@@ -56,7 +58,7 @@ impl LuaRuntime {
 }
 
 impl RuntimeEngine for LuaRuntime {
-    fn execute(&mut self, function_name: &str, args: &[RuntimeValue]) -> RuntimeResult<RuntimeValue> {
+    fn execute(&mut self, function_name: &str, _args: &[RuntimeValue]) -> RuntimeResult<RuntimeValue> {
         // TODO: Look up function in registry
         // TODO: Convert RuntimeValue args to Lua values
         // TODO: Execute function with timeout protection

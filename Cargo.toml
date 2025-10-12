@@ -2,6 +2,13 @@
 name = "hyperQL"
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0-or-later"
+description = "Query language for hyperspatial graph databases with temporal and spatial semantics"
+repository = "https://github.com/yourusername/hyperQL"
+readme = "README.md"
+keywords = ["query-language", "database", "graph", "parser"]
+categories = ["database-implementations", "parser-implementations"]
+authors = ["Your Name <your.email@example.com>"]
 
 [dependencies]
 chrono = { version = "0.4.42", features = ["serde"] }

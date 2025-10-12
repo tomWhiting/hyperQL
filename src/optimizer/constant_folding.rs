@@ -1,4 +1,4 @@
-use crate::compiler::{ExecutionPlan, CompiledExpression, ValueType};
+use crate::compiler::{ExecutionPlan, CompiledExpression};
 use crate::error::Result;
 use crate::ast::{BinaryOperator, UnaryOperator};
 use crate::types::Value;
@@ -333,6 +333,7 @@ impl ConstantFoldingOptimizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::ValueType;
 
     fn create_int_literal(val: i64) -> CompiledExpression {
         CompiledExpression::Literal(Value::Int(val))

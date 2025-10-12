@@ -228,7 +228,7 @@ impl SemanticValidator {
     }
 
     /// Validate TRAVERSE clause (graph operations)
-    fn validate_traverse_clause(&self, traverse: &TraverseClause, result: &mut ValidationResult) -> Result<()> {
+    fn validate_traverse_clause(&self, _traverse: &TraverseClause, result: &mut ValidationResult) -> Result<()> {
         // TODO: Add specific traverse validation based on AST structure
         // For now, mark as validated
         result.metadata.phases_completed.push("traverse_validation".to_string());
@@ -349,6 +349,7 @@ impl SemanticValidator {
     }
 
     /// Check if SELECT has wildcard projection
+    #[allow(dead_code)]
     fn has_wildcard_projection(&self, select: &SelectStatement) -> bool {
         select.select_list.iter().any(|proj| matches!(proj, SelectItem::Wildcard))
     }
@@ -506,7 +507,7 @@ impl SemanticValidator {
     }
 
     /// Validate ORDER BY expression
-    fn validate_order_by_expression(&self, expr: &Expression, select: &SelectStatement) -> Result<()> {
+    fn validate_order_by_expression(&self, _expr: &Expression, _select: &SelectStatement) -> Result<()> {
         // For now, just check that it's not completely invalid
         // TODO: Add more specific ORDER BY validation
         Ok(())

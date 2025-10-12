@@ -81,6 +81,7 @@ pub struct SerializationMetadata {
 }
 
 /// Plan serializer
+#[allow(dead_code)]
 pub struct PlanSerializer {
     /// Serialization options
     options: SerializationOptions,
@@ -92,6 +93,7 @@ pub struct PlanSerializer {
 
 /// Type registry for custom serialization
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TypeRegistry {
     /// Registered types
     types: HashMap<String, TypeDescriptor>,
@@ -111,6 +113,7 @@ pub struct TypeDescriptor {
 
 /// Schema registry for version management
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SchemaRegistry {
     /// Schema definitions by version
     schemas: HashMap<u32, SchemaDefinition>,
@@ -132,6 +135,7 @@ pub struct SchemaDefinition {
 /// Binary serialization writer
 pub struct BinaryWriter<W: Write> {
     writer: W,
+    #[allow(dead_code)]
     bytes_written: usize,
     checksum: u32, // TODO: Replace with actual hasher
 }
@@ -139,11 +143,13 @@ pub struct BinaryWriter<W: Write> {
 /// Binary serialization reader
 pub struct BinaryReader<R: Read> {
     reader: R,
+    #[allow(dead_code)]
     bytes_read: usize,
     checksum: u32, // TODO: Replace with actual hasher
 }
 
 /// JSON serialization support
+#[allow(dead_code)]
 pub struct JsonSerializer {
     pretty_print: bool,
     include_types: bool,
@@ -249,7 +255,7 @@ impl PlanSerializer {
     }
     
     // Binary serialization methods
-    fn serialize_binary_logical(&self, plan: &LogicalPlan) -> IRResult<SerializedPlan> {
+    fn serialize_binary_logical(&self, _plan: &LogicalPlan) -> IRResult<SerializedPlan> {
         // TODO: Implement binary serialization for logical plans
         // TODO: Include schema version and metadata
         // TODO: Apply compression if enabled
@@ -257,7 +263,7 @@ impl PlanSerializer {
         todo!("Binary logical plan serialization")
     }
     
-    fn serialize_binary_physical(&self, plan: &PhysicalPlan) -> IRResult<SerializedPlan> {
+    fn serialize_binary_physical(&self, _plan: &PhysicalPlan) -> IRResult<SerializedPlan> {
         // TODO: Implement binary serialization for physical plans
         // TODO: Include resource requirements and strategies
         // TODO: Apply compression if enabled
@@ -265,7 +271,7 @@ impl PlanSerializer {
         todo!("Binary physical plan serialization")
     }
     
-    fn deserialize_binary_logical(&self, data: &[u8]) -> IRResult<LogicalPlan> {
+    fn deserialize_binary_logical(&self, _data: &[u8]) -> IRResult<LogicalPlan> {
         // TODO: Implement binary deserialization for logical plans
         // TODO: Validate schema version and migrate if needed
         // TODO: Decompress if necessary
@@ -273,7 +279,7 @@ impl PlanSerializer {
         todo!("Binary logical plan deserialization")
     }
     
-    fn deserialize_binary_physical(&self, data: &[u8]) -> IRResult<PhysicalPlan> {
+    fn deserialize_binary_physical(&self, _data: &[u8]) -> IRResult<PhysicalPlan> {
         // TODO: Implement binary deserialization for physical plans
         // TODO: Reconstruct resource requirements and strategies
         // TODO: Decompress if necessary
@@ -282,7 +288,7 @@ impl PlanSerializer {
     }
     
     // JSON serialization methods
-    fn serialize_json_logical(&self, plan: &LogicalPlan) -> IRResult<SerializedPlan> {
+    fn serialize_json_logical(&self, _plan: &LogicalPlan) -> IRResult<SerializedPlan> {
         // TODO: Implement JSON serialization for logical plans
         // TODO: Include human-readable metadata
         // TODO: Support pretty printing option
@@ -290,21 +296,21 @@ impl PlanSerializer {
         todo!("JSON logical plan serialization")
     }
     
-    fn serialize_json_physical(&self, plan: &PhysicalPlan) -> IRResult<SerializedPlan> {
+    fn serialize_json_physical(&self, _plan: &PhysicalPlan) -> IRResult<SerializedPlan> {
         // TODO: Implement JSON serialization for physical plans
         // TODO: Include execution strategy information
         
         todo!("JSON physical plan serialization")
     }
     
-    fn deserialize_json_logical(&self, data: &[u8]) -> IRResult<LogicalPlan> {
+    fn deserialize_json_logical(&self, _data: &[u8]) -> IRResult<LogicalPlan> {
         // TODO: Implement JSON deserialization for logical plans
         // TODO: Parse and validate JSON structure
         
         todo!("JSON logical plan deserialization")
     }
     
-    fn deserialize_json_physical(&self, data: &[u8]) -> IRResult<PhysicalPlan> {
+    fn deserialize_json_physical(&self, _data: &[u8]) -> IRResult<PhysicalPlan> {
         // TODO: Implement JSON deserialization for physical plans
         // TODO: Reconstruct execution strategies from JSON
         
@@ -312,52 +318,52 @@ impl PlanSerializer {
     }
     
     // MessagePack serialization methods
-    fn serialize_msgpack_logical(&self, plan: &LogicalPlan) -> IRResult<SerializedPlan> {
+    fn serialize_msgpack_logical(&self, _plan: &LogicalPlan) -> IRResult<SerializedPlan> {
         // TODO: Implement MessagePack serialization for logical plans
         // TODO: Optimize for network transmission
         
         todo!("MessagePack logical plan serialization")
     }
     
-    fn serialize_msgpack_physical(&self, plan: &PhysicalPlan) -> IRResult<SerializedPlan> {
+    fn serialize_msgpack_physical(&self, _plan: &PhysicalPlan) -> IRResult<SerializedPlan> {
         // TODO: Implement MessagePack serialization for physical plans
         
         todo!("MessagePack physical plan serialization")
     }
     
-    fn deserialize_msgpack_logical(&self, data: &[u8]) -> IRResult<LogicalPlan> {
+    fn deserialize_msgpack_logical(&self, _data: &[u8]) -> IRResult<LogicalPlan> {
         // TODO: Implement MessagePack deserialization for logical plans
         
         todo!("MessagePack logical plan deserialization")
     }
     
-    fn deserialize_msgpack_physical(&self, data: &[u8]) -> IRResult<PhysicalPlan> {
+    fn deserialize_msgpack_physical(&self, _data: &[u8]) -> IRResult<PhysicalPlan> {
         // TODO: Implement MessagePack deserialization for physical plans
         
         todo!("MessagePack physical plan deserialization")
     }
     
     // Protocol Buffers serialization methods
-    fn serialize_protobuf_logical(&self, plan: &LogicalPlan) -> IRResult<SerializedPlan> {
+    fn serialize_protobuf_logical(&self, _plan: &LogicalPlan) -> IRResult<SerializedPlan> {
         // TODO: Implement Protocol Buffers serialization for logical plans
         // TODO: Use schema registry for version management
         
         todo!("Protocol Buffers logical plan serialization")
     }
     
-    fn serialize_protobuf_physical(&self, plan: &PhysicalPlan) -> IRResult<SerializedPlan> {
+    fn serialize_protobuf_physical(&self, _plan: &PhysicalPlan) -> IRResult<SerializedPlan> {
         // TODO: Implement Protocol Buffers serialization for physical plans
         
         todo!("Protocol Buffers physical plan serialization")
     }
     
-    fn deserialize_protobuf_logical(&self, data: &[u8]) -> IRResult<LogicalPlan> {
+    fn deserialize_protobuf_logical(&self, _data: &[u8]) -> IRResult<LogicalPlan> {
         // TODO: Implement Protocol Buffers deserialization for logical plans
         
         todo!("Protocol Buffers logical plan deserialization")
     }
     
-    fn deserialize_protobuf_physical(&self, data: &[u8]) -> IRResult<PhysicalPlan> {
+    fn deserialize_protobuf_physical(&self, _data: &[u8]) -> IRResult<PhysicalPlan> {
         // TODO: Implement Protocol Buffers deserialization for physical plans
         
         todo!("Protocol Buffers physical plan deserialization")
@@ -379,7 +385,7 @@ impl<W: Write> BinaryWriter<W> {
     }
     
     /// Write a value with type information
-    pub fn write_value(&mut self, value: &Value) -> IRResult<()> {
+    pub fn write_value(&mut self, _value: &Value) -> IRResult<()> {
         // TODO: Implement value serialization
         // TODO: Include type tags for deserialization
         // TODO: Handle hyperbolic-specific types
@@ -388,7 +394,7 @@ impl<W: Write> BinaryWriter<W> {
     }
     
     /// Write schema information
-    pub fn write_schema(&mut self, schema: &Schema) -> IRResult<()> {
+    pub fn write_schema(&mut self, _schema: &Schema) -> IRResult<()> {
         // TODO: Serialize schema metadata
         // TODO: Include column definitions and types
         // TODO: Handle positioning information
@@ -397,7 +403,7 @@ impl<W: Write> BinaryWriter<W> {
     }
     
     /// Write operator information
-    pub fn write_operator(&mut self, operator: &dyn LogicalOperator) -> IRResult<()> {
+    pub fn write_operator(&mut self, _operator: &dyn LogicalOperator) -> IRResult<()> {
         // TODO: Serialize operator type and configuration
         // TODO: Include child operator references
         // TODO: Handle custom operator types
@@ -554,7 +560,7 @@ pub mod utils {
     }
     
     /// Calculate checksum for data integrity
-    pub fn calculate_checksum(data: &[u8]) -> u32 {
+    pub fn calculate_checksum(_data: &[u8]) -> u32 {
         // TODO: Implement proper checksum calculation
         0
     }

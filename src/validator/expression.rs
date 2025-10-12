@@ -518,8 +518,8 @@ impl ExpressionValidator {
     /// Validate geometric expressions
     fn validate_geometric_expression(
         &self,
-        geo_expr: &geometric::GeometricExpression,
-        type_checker: &mut TypeChecker,
+        _geo_expr: &geometric::GeometricExpression,
+        _type_checker: &mut TypeChecker,
         result: &mut ValidationResult,
     ) -> Result<()> {
         // TODO: Add specific geometric expression validation
@@ -529,11 +529,11 @@ impl ExpressionValidator {
         Ok(())
     }
 
-    /// Validate vector expressions  
+    /// Validate vector expressions
     fn validate_vector_expression(
         &self,
         vec_expr: &VectorExpression,
-        type_checker: &mut TypeChecker,
+        _type_checker: &mut TypeChecker,
         result: &mut ValidationResult,
     ) -> Result<()> {
         match vec_expr {

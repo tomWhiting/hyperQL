@@ -306,6 +306,7 @@ pub enum PhysicalAggregate {
 // =============================================================================
 
 /// Query optimizer
+#[allow(dead_code)]
 pub struct QueryOptimizer {
     /// Optimization rules
     rules: Vec<Box<dyn OptimizationRule>>,
@@ -580,7 +581,7 @@ impl QueryOptimizer {
     }
     
     /// Optimize a logical plan
-    pub fn optimize(&mut self, plan: LogicalPlan) -> IRResult<LogicalPlan> {
+    pub fn optimize(&mut self, _plan: LogicalPlan) -> IRResult<LogicalPlan> {
         // TODO: Apply optimization rules iteratively
         // TODO: Use cost model to select best plan
         // TODO: Apply hyperbolic-specific optimizations
@@ -590,7 +591,7 @@ impl QueryOptimizer {
     }
     
     /// Generate physical plan from logical plan
-    pub fn generate_physical_plan(&self, logical_plan: &LogicalPlan, context: &PhysicalPlanContext) -> IRResult<PhysicalPlan> {
+    pub fn generate_physical_plan(&self, _logical_plan: &LogicalPlan, _context: &PhysicalPlanContext) -> IRResult<PhysicalPlan> {
         // TODO: Convert logical operators to physical operators
         // TODO: Select optimal physical implementations
         // TODO: Apply parallelization strategy

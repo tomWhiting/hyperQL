@@ -64,6 +64,12 @@ pub fn parse_select_statement(input: &str) -> Result<Statement> {
         None
     };
 
+    let offset = if let Some(offset_part) = parts.remove("OFFSET") {
+        offset_part.trim().parse::<u64>().ok()
+    } else {
+        None
+    };
+
     Ok(Statement::Select(SelectStatement {
         select_list,
         from,
@@ -73,7 +79,7 @@ pub fn parse_select_statement(input: &str) -> Result<Statement> {
         having,
         order_by,
         limit,
-        offset: None,
+        offset,
         distinct: false,
     }))
 }

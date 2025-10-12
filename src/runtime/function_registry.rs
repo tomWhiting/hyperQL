@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 /// Central registry for managing user-defined functions
+#[allow(dead_code)]
 pub struct FunctionRegistry {
     /// Function storage by name and version
     functions: HashMap<String, Vec<FunctionVersion>>,
@@ -181,7 +182,7 @@ impl FunctionRegistry {
     /// Register a new function or version
     pub fn register_function(
         &mut self,
-        implementation: FunctionImplementation,
+        _implementation: FunctionImplementation,
         metadata: FunctionMetadata,
     ) -> RuntimeResult<u32> {
         // TODO: Validate function metadata
@@ -220,8 +221,8 @@ impl FunctionRegistry {
     /// Search functions by category or tags
     pub fn search_functions(
         &self,
-        category: Option<FunctionCategory>,
-        tags: Option<&[String]>,
+        _category: Option<FunctionCategory>,
+        _tags: Option<&[String]>,
     ) -> Vec<FunctionSummary> {
         // TODO: Filter functions by category and tags
         // TODO: Return matching function summaries
@@ -260,7 +261,7 @@ impl FunctionRegistry {
     pub fn validate_signature(
         &self,
         name: &str,
-        args: &[TypeDefinition],
+        _args: &[TypeDefinition],
     ) -> RuntimeResult<TypeDefinition> {
         // TODO: Get function metadata
         // TODO: Check parameter count and types

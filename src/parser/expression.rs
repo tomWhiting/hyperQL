@@ -37,8 +37,22 @@ pub fn parse_simple_expression(input: &str) -> Result<Expression> {
 
     for (op_str, op_type) in &operators {
         if let Some(op_pos) = utils::find_operator_position(input, op_str) {
-            let left = parse_simple_column_or_literal(&input[..op_pos])?;
-            let right = parse_simple_column_or_literal(&input[op_pos + op_str.len()..])?;
+            let left_part = &input[..op_pos];
+            let right_part = &input[op_pos + op_str.len()..];
+
+            // Try parsing as arithmetic expression first, fallback to simple column/literal
+            let left = if left_part.contains('+') || left_part.contains('-') || left_part.contains('*') || left_part.contains('/') {
+                parse_arithmetic_expression(left_part)?
+            } else {
+                parse_simple_column_or_literal(left_part)?
+            };
+
+            let right = if right_part.contains('+') || right_part.contains('-') || right_part.contains('*') || right_part.contains('/') {
+                parse_arithmetic_expression(right_part)?
+            } else {
+                parse_simple_column_or_literal(right_part)?
+            };
+
             return Ok(Expression::Binary {
                 left: Box::new(left),
                 op: op_type.clone(),

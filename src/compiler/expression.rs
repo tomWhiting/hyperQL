@@ -6,10 +6,12 @@ pub use super::{CompiledExpression, ValueType};
 
 #[derive(Debug, Clone)]
 pub struct ExpressionCompiler {
+    #[allow(dead_code)]
     schemas: HashMap<String, EntitySchema>,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct EntitySchema {
     pub name: String,
     pub properties: HashMap<String, ValueType>,

@@ -356,7 +356,7 @@ impl StatementValidator {
     }
 
     /// Validate TRAVERSE clause (graph operations)
-    fn validate_traverse_statement(&self, traverse: &TraverseClause, result: &mut ValidationResult) -> Result<()> {
+    fn validate_traverse_statement(&self, _traverse: &TraverseClause, result: &mut ValidationResult) -> Result<()> {
         // TODO: Implement specific traverse validation based on AST structure
         // For now, just add placeholder validation
         
@@ -418,6 +418,7 @@ impl StatementValidator {
     }
 
     /// Validate reserved words and identifiers
+    #[allow(dead_code)]
     fn validate_identifier(&self, name: &str, context: &str, result: &mut ValidationResult) {
         // Check for SQL reserved words
         let reserved_words = [

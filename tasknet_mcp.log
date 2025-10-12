@@ -1,0 +1,30 @@
+2025-10-12 19:32:42,013 - task_net.mcp.run_server - INFO - Starting TaskNet MCP Worker Manager
+2025-10-12 19:32:42,013 - task_net.mcp.run_server - INFO - Project Directory: /Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL
+2025-10-12 19:32:42,013 - task_net.mcp.run_server - INFO - Database Path: /Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db
+2025-10-12 19:32:42,013 - task_net.mcp.run_server - INFO - Database URL: file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db
+2025-10-12 19:32:42,013 - task_net.mcp.run_server - INFO - PWD env: /Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL
+2025-10-12 19:32:42,013 - task_net.mcp.run_server - INFO - os.getcwd(): /Users/tom/Developer/spaces/projects/task-net/main/task-net
+2025-10-12 19:32:42,013 - task_net.mcp.run_server - INFO - Database file exists: False
+2025-10-12 19:32:42,014 - task_net.persistence.libsql_client - INFO - LibSQL client initialized for file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db
+2025-10-12 19:32:42,014 - task_net.persistence.libsql_client - INFO - Connecting to LibSQL (attempt 1/3)
+2025-10-12 19:32:42,016 - task_net.persistence.libsql_client - INFO - Successfully connected to LibSQL at file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db via file
+2025-10-12 19:32:42,017 - task_net.persistence.libsql_client - ERROR - Query execution failed: no such table: sessions
+2025-10-12 19:32:42,018 - task_net.mcp.run_server - WARNING - Could not cleanup stale workers: Query execution failed: no such table: sessions
+2025-10-12 19:32:42,018 - task_net.mcp.run_server - INFO - Starting TaskNet web backend on port 8742
+2025-10-12 19:32:42,032 - task_net.mcp.run_server - INFO - Web backend started successfully
+2025-10-12 19:32:46,054 - task_net.mcp.run_server - WARNING - Could not register project with backend after 5 attempts: Cannot connect to host localhost:8742 ssl:default [Multiple exceptions: [Errno 61] Connect call failed ('127.0.0.1', 8742), [Errno 61] Connect call failed ('::1', 8742, 0, 0)]
+2025-10-12 19:32:46,055 - task_net.persistence.libsql_client - INFO - LibSQL client initialized for file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db
+2025-10-12 19:32:46,055 - task_net.mcp.servers.worker_manager - INFO - Initializing database and starting services...
+2025-10-12 19:32:46,056 - task_net.persistence.libsql_client - INFO - Connecting to LibSQL (attempt 1/3)
+2025-10-12 19:32:46,056 - task_net.persistence.libsql_client - INFO - Successfully connected to LibSQL at file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db via file
+2025-10-12 19:32:46,061 - task_net.persistence.libsql_client - ERROR - Query execution failed: duplicate column name: workflow_metadata
+2025-10-12 19:32:46,062 - task_net.persistence.libsql_client - ERROR - Query execution failed: duplicate column name: created_by
+2025-10-12 19:32:46,062 - task_net.mcp.servers.worker_manager - INFO - Database schema initialized successfully
+2025-10-12 19:32:46,062 - task_net.mcp.servers.worker_manager - INFO - Started worker health check service
+2025-10-12 19:32:46,062 - task_net.mcp.servers.worker_manager - INFO - Database initialized on MCP server startup
+2025-10-12 19:32:46,062 - task_net.mcp.servers.worker_manager - INFO - Synchronizing existing workers with database after MCP restart...
+2025-10-12 19:32:46,062 - task_net.mcp.servers.worker_manager - INFO - Synchronized 0 active workers with database
+2025-10-12 19:32:46,062 - task_net.mcp.servers.worker_manager - INFO - Waiting 30 seconds before first health check...
+2025-10-12 19:32:46,077 - mcp.server.lowlevel.server - INFO - Processing request of type ListToolsRequest
+2025-10-12 19:32:46,078 - mcp.server.lowlevel.server - INFO - Processing request of type ListPromptsRequest
+2025-10-12 19:32:46,078 - mcp.server.lowlevel.server - INFO - Processing request of type ListResourcesRequest

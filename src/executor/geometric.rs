@@ -15,6 +15,7 @@ impl GeometricEngine {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new_with_curvature(curvature: f64) -> Self {
         Self {
             default_curvature: curvature,

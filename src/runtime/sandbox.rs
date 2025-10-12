@@ -174,7 +174,7 @@ impl SecuritySandbox {
     }
     
     /// Begin sandboxed execution
-    pub fn begin_execution(&mut self, context: SandboxContext) -> RuntimeResult<SandboxGuard> {
+    pub fn begin_execution(&mut self, context: SandboxContext) -> RuntimeResult<SandboxGuard<'_>> {
         // TODO: Initialize resource tracking
         // TODO: Set up monitoring hooks
         // TODO: Install security policies
@@ -325,6 +325,7 @@ pub struct SandboxGuard<'a> {
 
 impl<'a> SandboxGuard<'a> {
     /// Create a new sandbox guard
+    #[allow(dead_code)]
     fn new(sandbox: &'a mut SecuritySandbox, context: SandboxContext) -> Self {
         Self { sandbox, context }
     }

@@ -60,8 +60,8 @@ impl PlanExecutor {
 
     pub fn execute_plan(&mut self, plan: &ExecutionPlan) -> Result<Vec<ResultRow>> {
         match plan {
-            ExecutionPlan::Scan { table, filter: _, projection: _ } => {
-                self.execute_scan(table)
+            ExecutionPlan::Scan { table, filter, projection } => {
+                self.execute_scan(table, filter.as_ref(), projection)
             },
             ExecutionPlan::Filter { input, predicate } => {
                 self.execute_filter(input, predicate)
@@ -111,7 +111,12 @@ impl PlanExecutor {
         }
     }
 
-    fn execute_scan(&mut self, table: &str) -> Result<Vec<ResultRow>> {
+    fn execute_scan(
+        &mut self,
+        table: &str,
+        filter: Option<&CompiledExpression>,
+        projection: &[CompiledProjection]
+    ) -> Result<Vec<ResultRow>> {
         let entities = self.data_source.scan(table)?;
         self.stats_collector.entities_scanned += entities.len() as u64;
 
@@ -131,7 +136,31 @@ impl PlanExecutor {
                 columns.insert(prop_name.0, prop_value);
             }
 
-            rows.push(ResultRow { columns });
+            let row = ResultRow { columns };
+
+            // Apply filter if present
+            if let Some(filter_expr) = filter {
+                if !self.expression_evaluator.evaluate_predicate(filter_expr, &row)? {
+                    continue; // Skip rows that don't match the filter
+                }
+            }
+
+            // Apply projection if present
+            if !projection.is_empty() {
+                let mut projected_columns = HashMap::new();
+                for proj in projection {
+                    let value = self.expression_evaluator.evaluate_expression(&proj.expression, &row)?;
+                    let column_name = if let Some(ref alias) = proj.alias {
+                        alias.clone()
+                    } else {
+                        proj.output_name.clone()
+                    };
+                    projected_columns.insert(column_name, value);
+                }
+                rows.push(ResultRow { columns: projected_columns });
+            } else {
+                rows.push(row);
+            }
         }
 
         Ok(rows)

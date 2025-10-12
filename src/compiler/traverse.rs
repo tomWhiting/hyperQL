@@ -3,10 +3,12 @@ use crate::error::*;
 use super::expression::ExpressionCompiler;
 use super::{CompiledTraversePattern, CompiledNodePattern, CompiledRelationshipPattern};
 
+#[allow(dead_code)]
 pub struct TraverseCompiler {
     expression_compiler: ExpressionCompiler,
 }
 
+#[allow(dead_code)]
 impl TraverseCompiler {
     pub fn new() -> Self {
         Self {
