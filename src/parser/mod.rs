@@ -21,6 +21,7 @@ mod clause;
 mod traverse;
 mod utils;
 mod geometric;
+mod schema;
 
 
 /// Parse a complete HyperQL statement

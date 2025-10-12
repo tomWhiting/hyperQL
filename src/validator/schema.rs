@@ -50,6 +50,16 @@ impl SchemaValidator {
             Statement::Insert(insert) => self.validate_insert_schema(insert, result),
             Statement::Update(update) => self.validate_update_schema(update, result),
             Statement::Delete(delete) => self.validate_delete_schema(delete, result),
+            Statement::Schema(_schema_op) => {
+                // TODO: Implement schema DDL schema validation
+                // Validate that schema operations reference valid collections
+                Ok(())
+            },
+            Statement::Stream(_stream_op) => {
+                // TODO: Implement stream schema validation
+                // Validate stream schemas and field types
+                Ok(())
+            },
         }
     }
 

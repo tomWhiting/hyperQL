@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::error::*;
-use super::{select, expression};
+use super::{select, expression, schema};
 
 pub fn parse_statement(input: &str) -> Result<Statement> {
     let input = input.trim();
@@ -14,9 +14,12 @@ pub fn parse_statement(input: &str) -> Result<Statement> {
         parse_update_statement(input)
     } else if upper_input.starts_with("DELETE") {
         parse_delete_statement(input)
+    } else if upper_input.starts_with("CREATE SCHEMA") || upper_input.starts_with("ALTER SCHEMA")
+        || upper_input.starts_with("DROP SCHEMA") || upper_input.starts_with("DESCRIBE SCHEMA") {
+        schema::parse_schema_statement(input).map(Statement::Schema)
     } else {
         Err(HyperQLError::simple_parse_error(
-            "Unsupported statement type. Supported: SELECT, INSERT, UPDATE, DELETE",
+            "Unsupported statement type. Supported: SELECT, INSERT, UPDATE, DELETE, CREATE/ALTER/DROP/DESCRIBE SCHEMA",
             input,
             1,
             1,

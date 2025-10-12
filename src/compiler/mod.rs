@@ -390,6 +390,24 @@ impl Compiler {
                     estimated_cost,
                 });
             },
+            Statement::Schema(_schema_op) => {
+                // TODO: Implement schema DDL compilation
+                // Schema statements need to be compiled into SchemaEngine operations
+                // for creating, altering, and dropping schemas
+                return Err(HyperQLError::SemanticError {
+                    message: "Schema DDL compilation not yet implemented".to_string(),
+                    context: vec!["Schema operations will be supported in a future release".to_string()],
+                });
+            },
+            Statement::Stream(_stream_op) => {
+                // TODO: Implement stream DDL compilation
+                // Stream statements need to be compiled into stream engine operations
+                // for creating streams, producing events, and consuming from streams
+                return Err(HyperQLError::SemanticError {
+                    message: "Stream DDL compilation not yet implemented".to_string(),
+                    context: vec!["Stream operations will be supported in a future release".to_string()],
+                });
+            },
         };
 
         let metadata = self.metadata_generator.generate_metadata(&plan);

@@ -38,6 +38,16 @@ impl ExpressionValidator {
             Statement::Insert(insert) => self.validate_insert_expressions(insert, type_checker, result),
             Statement::Update(update) => self.validate_update_expressions(update, type_checker, result),
             Statement::Delete(delete) => self.validate_delete_expressions(delete, type_checker, result),
+            Statement::Schema(_schema_op) => {
+                // TODO: Implement schema expression validation
+                // Validate expressions in calculated fields and cascade configurations
+                Ok(())
+            },
+            Statement::Stream(_stream_op) => {
+                // TODO: Implement stream expression validation
+                // Validate expressions in stream filters and transformations
+                Ok(())
+            },
         }
     }
 

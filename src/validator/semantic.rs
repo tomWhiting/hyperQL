@@ -32,6 +32,16 @@ impl SemanticValidator {
             Statement::Insert(insert) => self.validate_insert(insert, result),
             Statement::Update(update) => self.validate_update(update, result),
             Statement::Delete(delete) => self.validate_delete(delete, result),
+            Statement::Schema(_schema_op) => {
+                // TODO: Implement schema semantic validation
+                // Validate semantic consistency of schema operations
+                Ok(())
+            },
+            Statement::Stream(_stream_op) => {
+                // TODO: Implement stream semantic validation
+                // Validate semantic consistency of stream operations
+                Ok(())
+            },
         }
     }
 

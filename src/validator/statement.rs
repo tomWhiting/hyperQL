@@ -33,6 +33,16 @@ impl StatementValidator {
             Statement::Insert(insert) => self.validate_insert_statement(insert, result),
             Statement::Update(update) => self.validate_update_statement(update, result),
             Statement::Delete(delete) => self.validate_delete_statement(delete, result),
+            Statement::Schema(_schema_op) => {
+                // TODO: Implement schema DDL validation
+                // Schema statements need validation for field definitions, cascade configs, etc.
+                Ok(())
+            },
+            Statement::Stream(_stream_op) => {
+                // TODO: Implement stream DDL validation
+                // Stream statements need validation for stream configs and consumer actions
+                Ok(())
+            },
         }
     }
 

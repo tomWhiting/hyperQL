@@ -120,6 +120,8 @@ pub mod geometric;
 pub mod graph;
 pub mod vector;
 pub mod timeseries;
+pub mod schema;
+pub mod streams;
 
 // Core query structures
 pub use crate::types::*;
@@ -136,6 +138,10 @@ pub enum Statement {
     Update(UpdateStatement),
     /// DELETE statement for data removal
     Delete(DeleteStatement),
+    /// Schema DDL statements
+    Schema(schema::SchemaOperation),
+    /// Stream DDL statements
+    Stream(streams::StreamOperation),
 }
 
 /// SELECT statement structure
