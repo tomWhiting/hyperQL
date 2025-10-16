@@ -228,6 +228,13 @@ pub enum Expression {
         op: UnaryOperator,
         expr: Box<Expression>,
     },
+    /// BETWEEN operation (value BETWEEN min AND max)
+    Between {
+        expr: Box<Expression>,
+        lower: Box<Expression>,
+        upper: Box<Expression>,
+        negated: bool,
+    },
     /// Function calls
     Function {
         name: String,
@@ -294,6 +301,8 @@ pub enum UnaryOperator {
     Not,
     Minus,
     Plus,
+    IsNull,
+    IsNotNull,
 }
 
 /// Vector expression types for named embeddings

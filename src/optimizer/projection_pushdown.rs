@@ -17,8 +17,8 @@ impl ProjectionPushdownOptimizer {
 
     fn optimize_plan(&mut self, plan: ExecutionPlan) -> Result<ExecutionPlan> {
         match plan {
-            ExecutionPlan::Project { input, expressions } => {
-                self.push_projection(*input, expressions)
+            ExecutionPlan::Project { input, expressions, distinct } => {
+                self.push_projection(*input, expressions, distinct)
             }
             ExecutionPlan::Filter { input, predicate } => {
                 let optimized_input = self.optimize_plan(*input)?;
@@ -61,59 +61,66 @@ impl ProjectionPushdownOptimizer {
         }
     }
 
-    fn push_projection(&mut self, plan: ExecutionPlan, expressions: Vec<CompiledProjection>) -> Result<ExecutionPlan> {
+    fn push_projection(&mut self, plan: ExecutionPlan, expressions: Vec<CompiledProjection>, distinct: bool) -> Result<ExecutionPlan> {
         let required_columns = self.extract_required_columns(&expressions);
-        
+
         match plan {
-            ExecutionPlan::Scan { table, filter, projection: _ } => {
+            ExecutionPlan::Scan { table, filter, projection: _, limit } => {
                 let new_projection = self.create_minimal_projection_for_columns(&required_columns);
                 Ok(ExecutionPlan::Project {
                     input: Box::new(ExecutionPlan::Scan {
                         table,
                         filter,
                         projection: new_projection,
+                        limit,
                     }),
                     expressions,
+                    distinct,
                 })
             }
-            ExecutionPlan::Project { input, expressions: inner_expressions } => {
+            ExecutionPlan::Project { input, expressions: inner_expressions, distinct: inner_distinct } => {
                 let inner_required = self.extract_columns_from_projections(&expressions, &inner_expressions);
                 let optimized_inner = if inner_required.len() < inner_expressions.len() {
                     let minimal_inner = self.create_projections_for_columns(&inner_required, &inner_expressions);
                     ExecutionPlan::Project {
                         input,
                         expressions: minimal_inner,
+                        distinct: inner_distinct,
                     }
                 } else {
                     ExecutionPlan::Project {
                         input,
                         expressions: inner_expressions,
+                        distinct: inner_distinct,
                     }
                 };
-                
+
                 Ok(ExecutionPlan::Project {
                     input: Box::new(optimized_inner),
                     expressions,
+                    distinct,
                 })
             }
             ExecutionPlan::Filter { input, predicate } => {
                 let predicate_columns = self.extract_columns_from_expression(&predicate);
                 let all_required: HashSet<String> = required_columns.union(&predicate_columns).cloned().collect();
-                
+
                 let optimized_input = self.push_projection_with_required_columns(*input, all_required)?;
-                
+
                 Ok(ExecutionPlan::Project {
                     input: Box::new(ExecutionPlan::Filter {
                         input: Box::new(optimized_input),
                         predicate,
                     }),
                     expressions,
+                    distinct,
                 })
             }
             _ => {
                 Ok(ExecutionPlan::Project {
                     input: Box::new(plan),
                     expressions,
+                    distinct,
                 })
             }
         }
@@ -121,12 +128,13 @@ impl ProjectionPushdownOptimizer {
 
     fn push_projection_with_required_columns(&mut self, plan: ExecutionPlan, required_columns: HashSet<String>) -> Result<ExecutionPlan> {
         match plan {
-            ExecutionPlan::Scan { table, filter, projection: _ } => {
+            ExecutionPlan::Scan { table, filter, projection: _, limit } => {
                 let new_projection = self.create_minimal_projection_for_columns(&required_columns);
                 Ok(ExecutionPlan::Scan {
                     table,
                     filter,
                     projection: new_projection,
+                    limit,
                 })
             }
             other => self.optimize_plan(other),
@@ -246,6 +254,7 @@ mod tests {
                 create_column_projection("age"),
                 create_column_projection("email"),
             ],
+            limit: None,
         }
     }
 
@@ -258,12 +267,13 @@ mod tests {
                 create_column_projection("name"),
                 create_column_projection("age"),
             ],
+            distinct: false,
         };
 
         let optimized = optimize(project).unwrap();
 
         match optimized {
-            ExecutionPlan::Project { input, expressions } => {
+            ExecutionPlan::Project { input, expressions, .. } => {
                 assert_eq!(expressions.len(), 2);
                 match input.as_ref() {
                     ExecutionPlan::Scan { projection, .. } => {
@@ -287,18 +297,20 @@ mod tests {
                 create_column_projection("age"),
                 create_column_projection("email"),
             ],
+            distinct: false,
         };
         let outer_project = ExecutionPlan::Project {
             input: Box::new(inner_project),
             expressions: vec![
                 create_column_projection("name"),
             ],
+            distinct: false,
         };
 
         let optimized = optimize(outer_project).unwrap();
 
         match optimized {
-            ExecutionPlan::Project { input, expressions } => {
+            ExecutionPlan::Project { input, expressions, .. } => {
                 assert_eq!(expressions.len(), 1);
                 match input.as_ref() {
                     ExecutionPlan::Project { expressions: inner_expressions, .. } => {
@@ -333,6 +345,7 @@ mod tests {
             expressions: vec![
                 create_column_projection("name"),
             ],
+            distinct: false,
         };
 
         let optimized = optimize(project).unwrap();
@@ -365,6 +378,7 @@ mod tests {
                 create_column_projection("name"),
                 create_column_projection("age"),
             ],
+            distinct: false,
         };
 
         let optimized = optimize(project).unwrap();

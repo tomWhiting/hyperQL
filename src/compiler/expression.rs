@@ -60,6 +60,42 @@ impl ExpressionCompiler {
                     result_type,
                 })
             }
+            Expression::Between { expr, lower, upper, negated } => {
+                let compiled_expr = self.compile_expression(*expr)?;
+                let compiled_lower = self.compile_expression(*lower)?;
+                let compiled_upper = self.compile_expression(*upper)?;
+
+                let ge_expr = CompiledExpression::Binary {
+                    left: Box::new(compiled_expr.clone()),
+                    op: BinaryOperator::GreaterThanOrEqual,
+                    right: Box::new(compiled_lower),
+                    result_type: ValueType::Bool,
+                };
+
+                let le_expr = CompiledExpression::Binary {
+                    left: Box::new(compiled_expr),
+                    op: BinaryOperator::LessThanOrEqual,
+                    right: Box::new(compiled_upper),
+                    result_type: ValueType::Bool,
+                };
+
+                let between_expr = CompiledExpression::Binary {
+                    left: Box::new(ge_expr),
+                    op: BinaryOperator::And,
+                    right: Box::new(le_expr),
+                    result_type: ValueType::Bool,
+                };
+
+                if negated {
+                    Ok(CompiledExpression::Unary {
+                        op: UnaryOperator::Not,
+                        expr: Box::new(between_expr),
+                        result_type: ValueType::Bool,
+                    })
+                } else {
+                    Ok(between_expr)
+                }
+            }
             Expression::Function { name, args } => {
                 let mut compiled_args = Vec::new();
                 for arg in args {
@@ -120,6 +156,7 @@ impl ExpressionCompiler {
             UnaryOperator::Minus | UnaryOperator::Plus => {
                 Ok(ValueType::Float)
             }
+            UnaryOperator::IsNull | UnaryOperator::IsNotNull => Ok(ValueType::Bool),
         }
     }
 

@@ -75,7 +75,8 @@ impl AggregationEngine {
             let column_name = if let Some(ref alias) = aggregate_projection.alias {
                 alias.clone()
             } else {
-                format!("agg_{}", aggregated_columns.len())
+                // Use the output_name from projection for better column naming
+                aggregate_projection.output_name.clone()
             };
             aggregated_columns.insert(column_name.clone(), agg_value);
         }
@@ -93,17 +94,27 @@ impl AggregationEngine {
             CompiledExpression::Function { name, args, .. } => {
                 match name.to_uppercase().as_str() {
                     "COUNT" => {
-                        if args.is_empty() || (args.len() == 1 && matches!(&args[0], CompiledExpression::Column { name, .. } if name == "*")) {
-                            Ok(Value::Int(rows.len() as i64))
-                        } else {
-                            let mut count = 0;
-                            for row in rows {
-                                if evaluator.evaluate_expression(&args[0], row).is_ok() {
-                                    count += 1;
-                                }
-                            }
-                            Ok(Value::Int(count))
+                        // COUNT(*) or COUNT() - count all rows
+                        // Check for wildcard first to avoid evaluation errors
+                        if args.is_empty() {
+                            return Ok(Value::Int(rows.len() as i64));
                         }
+
+                        // Check if first arg is wildcard column "*"
+                        if let CompiledExpression::Column { name, .. } = &args[0] {
+                            if name == "*" {
+                                return Ok(Value::Int(rows.len() as i64));
+                            }
+                        }
+
+                        // COUNT(column) - count non-null values
+                        let mut count = 0;
+                        for row in rows {
+                            if evaluator.evaluate_expression(&args[0], row).is_ok() {
+                                count += 1;
+                            }
+                        }
+                        Ok(Value::Int(count))
                     },
                     "SUM" => {
                         let mut sum = 0.0;

@@ -34,7 +34,7 @@ impl ExpressionSimplifyOptimizer {
                     predicate: simplified_predicate,
                 })
             }
-            ExecutionPlan::Project { input, expressions } => {
+            ExecutionPlan::Project { input, expressions, distinct } => {
                 let optimized_input = self.optimize_plan(*input)?;
                 let simplified_expressions = expressions
                     .into_iter()
@@ -46,6 +46,7 @@ impl ExpressionSimplifyOptimizer {
                 Ok(ExecutionPlan::Project {
                     input: Box::new(optimized_input),
                     expressions: simplified_expressions,
+                    distinct,
                 })
             }
             ExecutionPlan::GroupBy { input, group_expressions, aggregate_expressions } => {
@@ -102,7 +103,7 @@ impl ExpressionSimplifyOptimizer {
                     offset,
                 })
             }
-            ExecutionPlan::Scan { table, filter, projection } => {
+            ExecutionPlan::Scan { table, filter, projection, limit } => {
                 let simplified_filter = filter.map(|f| self.simplify_expression(f));
                 let simplified_projection = projection
                     .into_iter()
@@ -115,6 +116,7 @@ impl ExpressionSimplifyOptimizer {
                     table,
                     filter: simplified_filter,
                     projection: simplified_projection,
+                    limit,
                 })
             }
             other => Ok(other),
@@ -572,6 +574,7 @@ mod tests {
             table: "users".to_string(),
             filter: None,
             projection: vec![],
+            limit: None,
         };
         let filter = ExecutionPlan::Filter {
             input: Box::new(scan.clone()),

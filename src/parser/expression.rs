@@ -11,6 +11,16 @@ pub fn parse_simple_expression(input: &str) -> Result<Expression> {
         return geometric::parse_near_expression(input);
     }
 
+    // Check for IS NULL / IS NOT NULL
+    if let Some(is_null_expr) = try_parse_is_null(input)? {
+        return Ok(is_null_expr);
+    }
+
+    // Check for BETWEEN
+    if let Some(between_expr) = try_parse_between(input)? {
+        return Ok(between_expr);
+    }
+
     if let Some(and_pos) = utils::find_operator_position(input, " AND ") {
         let left = parse_simple_expression(&input[..and_pos])?;
         let right = parse_simple_expression(&input[and_pos + 5..])?;
@@ -29,6 +39,16 @@ pub fn parse_simple_expression(input: &str) -> Result<Expression> {
             op: BinaryOperator::Or,
             right: Box::new(right),
         });
+    }
+
+    // Check for LIKE / NOT LIKE
+    if let Some(like_expr) = try_parse_like(input)? {
+        return Ok(like_expr);
+    }
+
+    // Check for IN / NOT IN
+    if let Some(in_expr) = try_parse_in(input)? {
+        return Ok(in_expr);
     }
 
     let operators = [
@@ -316,4 +336,187 @@ fn parse_primary_expression(input: &str) -> Result<Expression> {
     }
 
     parse_simple_column_or_literal(input)
+}
+
+fn try_parse_is_null(input: &str) -> Result<Option<Expression>> {
+    let upper = input.to_uppercase();
+
+    if let Some(pos) = utils::find_operator_position(&upper, " IS NOT NULL") {
+        let expr_part = &input[..pos].trim();
+        let expr = parse_simple_column_or_literal(expr_part)?;
+        return Ok(Some(Expression::Unary {
+            op: UnaryOperator::IsNotNull,
+            expr: Box::new(expr),
+        }));
+    }
+
+    if let Some(pos) = utils::find_operator_position(&upper, " IS NULL") {
+        let expr_part = &input[..pos].trim();
+        let expr = parse_simple_column_or_literal(expr_part)?;
+        return Ok(Some(Expression::Unary {
+            op: UnaryOperator::IsNull,
+            expr: Box::new(expr),
+        }));
+    }
+
+    Ok(None)
+}
+
+fn try_parse_between(input: &str) -> Result<Option<Expression>> {
+    let upper = input.to_uppercase();
+
+    let (negated, between_keyword) = if let Some(pos) = upper.find(" NOT BETWEEN ") {
+        (true, pos)
+    } else if let Some(pos) = upper.find(" BETWEEN ") {
+        (false, pos)
+    } else {
+        return Ok(None);
+    };
+
+    let expr_part = &input[..between_keyword].trim();
+    let expr = parse_simple_column_or_literal(expr_part)?;
+
+    let between_keyword_len = if negated { 13 } else { 9 };
+    let rest = &input[between_keyword + between_keyword_len..].trim();
+
+    if let Some(and_pos) = utils::find_operator_position(rest, " AND ") {
+        let lower_part = &rest[..and_pos].trim();
+        let upper_part = &rest[and_pos + 5..].trim();
+
+        let lower = parse_simple_column_or_literal(lower_part)?;
+        let upper_expr = parse_simple_column_or_literal(upper_part)?;
+
+        return Ok(Some(Expression::Between {
+            expr: Box::new(expr),
+            lower: Box::new(lower),
+            upper: Box::new(upper_expr),
+            negated,
+        }));
+    }
+
+    Err(HyperQLError::simple_parse_error(
+        "BETWEEN requires AND keyword",
+        input,
+        1,
+        1,
+    ))
+}
+
+fn try_parse_like(input: &str) -> Result<Option<Expression>> {
+    let upper = input.to_uppercase();
+
+    if let Some(pos) = utils::find_operator_position(&upper, " NOT LIKE ") {
+        let left_part = &input[..pos].trim();
+        let right_part = &input[pos + 11..].trim();
+
+        let left = parse_simple_column_or_literal(left_part)?;
+        let right = parse_simple_column_or_literal(right_part)?;
+
+        return Ok(Some(Expression::Binary {
+            left: Box::new(left),
+            op: BinaryOperator::NotLike,
+            right: Box::new(right),
+        }));
+    }
+
+    if let Some(pos) = utils::find_operator_position(&upper, " LIKE ") {
+        let left_part = &input[..pos].trim();
+        let right_part = &input[pos + 6..].trim();
+
+        let left = parse_simple_column_or_literal(left_part)?;
+        let right = parse_simple_column_or_literal(right_part)?;
+
+        return Ok(Some(Expression::Binary {
+            left: Box::new(left),
+            op: BinaryOperator::Like,
+            right: Box::new(right),
+        }));
+    }
+
+    Ok(None)
+}
+
+fn try_parse_in(input: &str) -> Result<Option<Expression>> {
+    let upper = input.to_uppercase();
+
+    let (negated, in_keyword_pos) = if let Some(pos) = utils::find_operator_position(&upper, " NOT IN ") {
+        (true, pos)
+    } else if let Some(pos) = utils::find_operator_position(&upper, " IN ") {
+        (false, pos)
+    } else {
+        return Ok(None);
+    };
+
+    let expr_part = &input[..in_keyword_pos].trim();
+    let expr = parse_simple_column_or_literal(expr_part)?;
+
+    let in_keyword_len = if negated { 8 } else { 4 };
+    let list_part = &input[in_keyword_pos + in_keyword_len..].trim();
+
+    if !list_part.starts_with('(') || !list_part.ends_with(')') {
+        return Err(HyperQLError::simple_parse_error(
+            "IN operator requires parenthesized list",
+            input,
+            1,
+            1,
+        ));
+    }
+
+    let inner = &list_part[1..list_part.len()-1].trim();
+    let mut values = Vec::new();
+
+    if !inner.is_empty() {
+        for item in split_list_items(inner) {
+            values.push(parse_simple_column_or_literal(item.trim())?);
+        }
+    }
+
+    let list_expr = Expression::Function {
+        name: "__IN_LIST__".to_string(),
+        args: values,
+    };
+
+    let op = if negated {
+        BinaryOperator::NotIn
+    } else {
+        BinaryOperator::In
+    };
+
+    Ok(Some(Expression::Binary {
+        left: Box::new(expr),
+        op,
+        right: Box::new(list_expr),
+    }))
+}
+
+fn split_list_items(input: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let mut current_start = 0;
+    let mut in_quote = false;
+    let mut quote_char = '"';
+    let chars: Vec<char> = input.chars().collect();
+
+    for i in 0..chars.len() {
+        let ch = chars[i];
+
+        if (ch == '"' || ch == '\'') && (i == 0 || chars[i - 1] != '\\') {
+            if !in_quote {
+                in_quote = true;
+                quote_char = ch;
+            } else if ch == quote_char {
+                in_quote = false;
+            }
+        }
+
+        if ch == ',' && !in_quote {
+            items.push(&input[current_start..i]);
+            current_start = i + 1;
+        }
+    }
+
+    if current_start < input.len() {
+        items.push(&input[current_start..]);
+    }
+
+    items
 }

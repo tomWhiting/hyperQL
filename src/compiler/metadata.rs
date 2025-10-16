@@ -52,7 +52,7 @@ impl MetadataGenerator {
                 self.collect_metadata(input, metadata);
                 self.collect_expression_metadata(predicate, metadata);
             }
-            ExecutionPlan::Project { input, expressions } => {
+            ExecutionPlan::Project { input, expressions, .. } => {
                 self.collect_metadata(input, metadata);
                 for proj in expressions {
                     self.collect_expression_metadata(&proj.expression, metadata);

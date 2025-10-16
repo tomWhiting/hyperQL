@@ -348,18 +348,18 @@ fn plans_equivalent(plan1: &ExecutionPlan, plan2: &ExecutionPlan) -> bool {
     use std::mem;
 
     match (plan1, plan2) {
-        (ExecutionPlan::Scan { table: t1, filter: f1, projection: p1 },
-         ExecutionPlan::Scan { table: t2, filter: f2, projection: p2 }) => {
+        (ExecutionPlan::Scan { table: t1, filter: f1, projection: p1, limit: l1 },
+         ExecutionPlan::Scan { table: t2, filter: f2, projection: p2, limit: l2 }) => {
             t1 == t2 && expressions_equivalent(f1.as_ref(), f2.as_ref()) &&
-            p1.len() == p2.len()
+            p1.len() == p2.len() && l1 == l2
         }
         (ExecutionPlan::Filter { input: i1, predicate: p1 },
          ExecutionPlan::Filter { input: i2, predicate: p2 }) => {
             plans_equivalent(i1, i2) && expressions_equivalent(Some(p1), Some(p2))
         }
-        (ExecutionPlan::Project { input: i1, expressions: e1 },
-         ExecutionPlan::Project { input: i2, expressions: e2 }) => {
-            plans_equivalent(i1, i2) && e1.len() == e2.len()
+        (ExecutionPlan::Project { input: i1, expressions: e1, distinct: d1 },
+         ExecutionPlan::Project { input: i2, expressions: e2, distinct: d2 }) => {
+            plans_equivalent(i1, i2) && e1.len() == e2.len() && d1 == d2
         }
         _ => mem::discriminant(plan1) == mem::discriminant(plan2)
     }
@@ -414,6 +414,7 @@ mod tests {
             table: "users".to_string(),
             filter: None,
             projection: vec![],
+            limit: None,
         }
     }
 
@@ -593,6 +594,7 @@ mod tests {
                     output_name: "age".to_string(),
                 },
             ],
+            distinct: false,
         };
 
         let (optimized, stats) = optimizer.optimize_with_stats(project).unwrap();

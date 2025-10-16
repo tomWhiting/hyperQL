@@ -143,6 +143,29 @@ impl TypeChecker {
             Expression::Column(column_ref) => self.check_column_type(column_ref),
             Expression::Binary { left, op, right } => self.check_binary_expression_type(left, op, right),
             Expression::Unary { op, expr } => self.check_unary_expression_type(op, expr),
+            Expression::Between { expr, lower, upper, .. } => {
+                let expr_type = self.check_expression_type(expr)?;
+                let lower_type = self.check_expression_type(lower)?;
+                let upper_type = self.check_expression_type(upper)?;
+
+                if !expr_type.is_comparable() {
+                    return Err(HyperQLError::TypeError {
+                        expected: "comparable type".to_string(),
+                        found: expr_type.name().to_string(),
+                        context: "BETWEEN expression".to_string(),
+                    });
+                }
+
+                if !expr_type.is_compatible_with(&lower_type) || !expr_type.is_compatible_with(&upper_type) {
+                    return Err(HyperQLError::TypeError {
+                        expected: expr_type.name().to_string(),
+                        found: format!("{} and {}", lower_type.name(), upper_type.name()),
+                        context: "BETWEEN bounds must match expression type".to_string(),
+                    });
+                }
+
+                Ok(TypeInfo::Bool)
+            }
             Expression::Function { name, args } => self.check_function_type(name, args),
             Expression::Geometric(geo) => self.check_geometric_expression_type(geo),
             Expression::Vector(vec_expr) => self.check_vector_expression_type(vec_expr),
@@ -294,12 +317,12 @@ impl TypeChecker {
     }
     
     fn check_unary_expression_type(
-        &mut self, 
+        &mut self,
         operator: &UnaryOperator,
         operand: &Expression,
     ) -> Result<TypeInfo> {
         let operand_type = self.check_expression_type(operand)?;
-        
+
         Ok(match operator {
             UnaryOperator::Not => {
                 TypeInfo::Bool
@@ -313,6 +336,9 @@ impl TypeChecker {
                     });
                 }
                 operand_type
+            },
+            UnaryOperator::IsNull | UnaryOperator::IsNotNull => {
+                TypeInfo::Bool
             },
         })
     }

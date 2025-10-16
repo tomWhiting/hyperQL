@@ -38,12 +38,22 @@ impl SelectCompiler {
             };
         }
 
-        if !select.group_by.is_empty() {
-            let group_expressions = select.group_by.iter()
-                .map(|expr| self.expression_compiler.compile_expression(expr.clone()))
-                .collect::<Result<Vec<_>>>()?;
+        // Compile projections first to check for aggregate functions
+        let projections = self.compile_select_list(&select.select_list)?;
 
-            let projections = self.compile_select_list(&select.select_list)?;
+        // Check if any projection contains an aggregate function
+        let has_aggregates = projections.iter().any(|proj| self.contains_aggregate(&proj.expression));
+
+        if !select.group_by.is_empty() || has_aggregates {
+            // GROUP BY with explicit grouping columns, or implicit grouping (aggregates without GROUP BY)
+            let group_expressions = if !select.group_by.is_empty() {
+                select.group_by.iter()
+                    .map(|expr| self.expression_compiler.compile_expression(expr.clone()))
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                // No GROUP BY clause but has aggregates - implicit single-group aggregation
+                vec![]
+            };
 
             plan = ExecutionPlan::GroupBy {
                 input: Box::new(plan),
@@ -51,11 +61,12 @@ impl SelectCompiler {
                 aggregate_expressions: projections,
             };
         } else {
-            let projections = self.compile_select_list(&select.select_list)?;
+            // No aggregates - regular projection
             if !projections.is_empty() {
                 plan = ExecutionPlan::Project {
                     input: Box::new(plan),
                     expressions: projections,
+                    distinct: select.distinct,
                 };
             }
         }
@@ -104,10 +115,23 @@ impl SelectCompiler {
             }
         };
 
+        // CRITICAL OPTIMIZATION: Pass LIMIT down to Scan when query is simple enough
+        // Only push down LIMIT if there's no WHERE, ORDER BY, or GROUP BY
+        // (those operations need full result set before limiting)
+        let scan_limit = if select.where_clause.is_none()
+            && select.order_by.is_empty()
+            && select.group_by.is_empty()
+            && select.having.is_none() {
+            select.limit
+        } else {
+            None
+        };
+
         Ok(ExecutionPlan::Scan {
             table: table_name,
             filter: None,
             projection: vec![],
+            limit: scan_limit,
         })
     }
 
@@ -209,6 +233,33 @@ impl SelectCompiler {
         }
 
         Ok(compiled_patterns)
+    }
+
+    /// Check if an expression contains an aggregate function (COUNT, SUM, AVG, MIN, MAX, etc.)
+    fn contains_aggregate(&self, expr: &CompiledExpression) -> bool {
+        match expr {
+            CompiledExpression::Function { name, args, .. } => {
+                // Check if this function is an aggregate
+                let is_aggregate = matches!(
+                    name.to_uppercase().as_str(),
+                    "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "ARRAY_AGG" | "STRING_AGG"
+                );
+
+                if is_aggregate {
+                    return true;
+                }
+
+                // Recursively check args for nested aggregates
+                args.iter().any(|arg| self.contains_aggregate(arg))
+            }
+            CompiledExpression::Binary { left, right, .. } => {
+                self.contains_aggregate(left) || self.contains_aggregate(right)
+            }
+            CompiledExpression::Unary { expr, .. } => {
+                self.contains_aggregate(expr)
+            }
+            _ => false,
+        }
     }
 }
 

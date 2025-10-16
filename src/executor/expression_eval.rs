@@ -2,6 +2,13 @@ use crate::compiler::CompiledExpression;
 use crate::types::{ResultRow, Value};
 use crate::error::{HyperQLError, Result};
 use std::cmp::Ordering;
+use regex::Regex;
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+lazy_static::lazy_static! {
+    static ref REGEX_CACHE: Mutex<HashMap<String, Regex>> = Mutex::new(HashMap::new());
+}
 
 pub struct ExpressionEvaluator {
 }
@@ -144,7 +151,21 @@ impl ExpressionEvaluator {
             
             (Value::Bool(a), BinaryOperator::And, Value::Bool(b)) => Ok(Value::Bool(*a && *b)),
             (Value::Bool(a), BinaryOperator::Or, Value::Bool(b)) => Ok(Value::Bool(*a || *b)),
-            
+
+            (left_val, BinaryOperator::Like, Value::String(pattern)) => {
+                self.evaluate_like(left_val, pattern, false)
+            },
+            (left_val, BinaryOperator::NotLike, Value::String(pattern)) => {
+                self.evaluate_like(left_val, pattern, true)
+            },
+
+            (left_val, BinaryOperator::In, right_val) => {
+                self.evaluate_in(left_val, right_val, false)
+            },
+            (left_val, BinaryOperator::NotIn, right_val) => {
+                self.evaluate_in(left_val, right_val, true)
+            },
+
             _ => Err(HyperQLError::simple_parse_error(
                 &format!("Cannot apply operator {:?} to {:?} and {:?}", op, left, right),
                 "",
@@ -156,13 +177,17 @@ impl ExpressionEvaluator {
 
     fn evaluate_unary_op(&self, op: &crate::ast::UnaryOperator, val: &Value) -> Result<Value> {
         use crate::ast::UnaryOperator;
-        
+
         match (op, val) {
             (UnaryOperator::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
             (UnaryOperator::Minus, Value::Int(i)) => Ok(Value::Int(-i)),
             (UnaryOperator::Minus, Value::Float(f)) => Ok(Value::Float(-f)),
             (UnaryOperator::Plus, Value::Int(i)) => Ok(Value::Int(*i)),
             (UnaryOperator::Plus, Value::Float(f)) => Ok(Value::Float(*f)),
+            (UnaryOperator::IsNull, Value::Null) => Ok(Value::Bool(true)),
+            (UnaryOperator::IsNull, _) => Ok(Value::Bool(false)),
+            (UnaryOperator::IsNotNull, Value::Null) => Ok(Value::Bool(false)),
+            (UnaryOperator::IsNotNull, _) => Ok(Value::Bool(true)),
             _ => Err(HyperQLError::simple_parse_error(
                 &format!("Cannot apply unary operator {:?} to {:?}", op, val),
                 "",
@@ -173,14 +198,18 @@ impl ExpressionEvaluator {
     }
 
     fn evaluate_function(&self, name: &str, args: &[Value]) -> Result<Value> {
-        match name.to_uppercase().as_str() {
-            "COUNT" => {
-                if args.is_empty() {
-                    Ok(Value::Int(1))
-                } else {
-                    Ok(Value::Int(args.len() as i64))
-                }
+        match name {
+            "__IN_LIST__" => {
+                Ok(Value::List(args.to_vec()))
             },
+            _ => match name.to_uppercase().as_str() {
+                "COUNT" => {
+                    if args.is_empty() {
+                        Ok(Value::Int(1))
+                    } else {
+                        Ok(Value::Int(args.len() as i64))
+                    }
+                },
             "SUM" => {
                 if args.is_empty() {
                     Ok(Value::Int(0))
@@ -238,25 +267,26 @@ impl ExpressionEvaluator {
                     Ok(min_val.clone())
                 }
             },
-            "MAX" => {
-                if args.is_empty() {
-                    Ok(Value::Null)
-                } else {
-                    let mut max_val = &args[0];
-                    for arg in &args[1..] {
-                        if self.compare_values(arg, max_val) == Ordering::Greater {
-                            max_val = arg;
+                "MAX" => {
+                    if args.is_empty() {
+                        Ok(Value::Null)
+                    } else {
+                        let mut max_val = &args[0];
+                        for arg in &args[1..] {
+                            if self.compare_values(arg, max_val) == Ordering::Greater {
+                                max_val = arg;
+                            }
                         }
+                        Ok(max_val.clone())
                     }
-                    Ok(max_val.clone())
-                }
-            },
-            _ => Err(HyperQLError::simple_parse_error(
-                &format!("Unknown function: {}", name),
-                "",
-                1,
-                1,
-            ))
+                },
+                _ => Err(HyperQLError::simple_parse_error(
+                    &format!("Unknown function: {}", name),
+                    "",
+                    1,
+                    1,
+                ))
+            }
         }
     }
 
@@ -273,5 +303,105 @@ impl ExpressionEvaluator {
             (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
             _ => Ordering::Equal,
         }
+    }
+
+    fn evaluate_like(&self, value: &Value, pattern: &str, negated: bool) -> Result<Value> {
+        let text = match value {
+            Value::String(s) => s.as_str(),
+            Value::Null => return Ok(Value::Bool(negated)),
+            _ => return Err(HyperQLError::simple_parse_error(
+                "LIKE operator requires string value",
+                "",
+                1,
+                1,
+            )),
+        };
+
+        let regex_pattern = sql_pattern_to_regex(pattern);
+        let regex = get_cached_regex(&regex_pattern)?;
+        let matches = regex.is_match(text);
+
+        Ok(Value::Bool(if negated { !matches } else { matches }))
+    }
+
+    fn evaluate_in(&self, value: &Value, list: &Value, negated: bool) -> Result<Value> {
+        if matches!(value, Value::Null) {
+            return Ok(Value::Bool(false));
+        }
+
+        let contains = match list {
+            Value::List(items) => {
+                items.iter().any(|item| values_equal(value, item))
+            },
+            _ => return Err(HyperQLError::simple_parse_error(
+                "IN operator requires list value",
+                "",
+                1,
+                1,
+            )),
+        };
+
+        Ok(Value::Bool(if negated { !contains } else { contains }))
+    }
+}
+
+fn sql_pattern_to_regex(pattern: &str) -> String {
+    let mut regex = String::from("^");
+
+    let mut chars = pattern.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '%' => regex.push_str(".*"),
+            '_' => regex.push('.'),
+            '\\' => {
+                if let Some(&next_ch) = chars.peek() {
+                    chars.next();
+                    regex.push_str(&regex::escape(&next_ch.to_string()));
+                } else {
+                    regex.push_str(r"\\");
+                }
+            },
+            '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' => {
+                regex.push('\\');
+                regex.push(ch);
+            },
+            _ => regex.push(ch),
+        }
+    }
+
+    regex.push('$');
+    regex
+}
+
+fn get_cached_regex(pattern: &str) -> Result<Regex> {
+    let mut cache = REGEX_CACHE.lock().unwrap();
+
+    if let Some(regex) = cache.get(pattern) {
+        return Ok(regex.clone());
+    }
+
+    let regex = Regex::new(pattern).map_err(|e| {
+        HyperQLError::simple_parse_error(
+            &format!("Invalid LIKE pattern: {}", e),
+            "",
+            1,
+            1,
+        )
+    })?;
+
+    cache.insert(pattern.to_string(), regex.clone());
+    Ok(regex)
+}
+
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Null, Value::Null) => true,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Int(a), Value::Int(b)) => a == b,
+        (Value::Float(a), Value::Float(b)) => (a - b).abs() < f64::EPSILON,
+        (Value::Int(a), Value::Float(b)) => (*a as f64 - b).abs() < f64::EPSILON,
+        (Value::Float(a), Value::Int(b)) => (a - *b as f64).abs() < f64::EPSILON,
+        (Value::String(a), Value::String(b)) => a == b,
+        _ => false,
     }
 }

@@ -21,11 +21,12 @@ impl PredicatePushdownOptimizer {
                 let optimized_input = self.optimize_plan(*input)?;
                 self.push_predicate(optimized_input, predicate)
             }
-            ExecutionPlan::Project { input, expressions } => {
+            ExecutionPlan::Project { input, expressions, distinct } => {
                 let optimized_input = self.optimize_plan(*input)?;
                 Ok(ExecutionPlan::Project {
                     input: Box::new(optimized_input),
                     expressions,
+                    distinct,
                 })
             }
             ExecutionPlan::GroupBy { input, group_expressions, aggregate_expressions } => {
@@ -64,7 +65,7 @@ impl PredicatePushdownOptimizer {
 
     fn push_predicate(&mut self, plan: ExecutionPlan, predicate: CompiledExpression) -> Result<ExecutionPlan> {
         match plan {
-            ExecutionPlan::Scan { table, filter, projection } => {
+            ExecutionPlan::Scan { table, filter, projection, limit } => {
                 let merged_filter = match filter {
                     Some(existing_filter) => {
                         Some(self.merge_filters(existing_filter, predicate))
@@ -75,6 +76,7 @@ impl PredicatePushdownOptimizer {
                     table,
                     filter: merged_filter,
                     projection,
+                    limit,
                 })
             }
             ExecutionPlan::Filter { input, predicate: existing_predicate } => {
@@ -82,18 +84,20 @@ impl PredicatePushdownOptimizer {
                 let merged_predicate = self.merge_filters(existing_predicate, predicate);
                 self.push_predicate(optimized_input, merged_predicate)
             }
-            ExecutionPlan::Project { input, expressions } => {
+            ExecutionPlan::Project { input, expressions, distinct } => {
                 if self.predicate_references_only_available_columns(&predicate, &expressions) {
                     let optimized_input = self.push_predicate(*input, predicate)?;
                     Ok(ExecutionPlan::Project {
                         input: Box::new(optimized_input),
                         expressions,
+                        distinct,
                     })
                 } else {
                     Ok(ExecutionPlan::Filter {
                         input: Box::new(ExecutionPlan::Project {
                             input,
                             expressions,
+                            distinct,
                         }),
                         predicate,
                     })
@@ -175,6 +179,7 @@ mod tests {
             table: "users".to_string(),
             filter: None,
             projection: vec![],
+            limit: None,
         }
     }
 
@@ -266,6 +271,7 @@ mod tests {
                     output_name: "age".to_string(),
                 },
             ],
+            distinct: false,
         };
         let filter = ExecutionPlan::Filter {
             input: Box::new(project),
@@ -303,6 +309,7 @@ mod tests {
                     output_name: "name".to_string(),
                 },
             ],
+            distinct: false,
         };
         let filter = ExecutionPlan::Filter {
             input: Box::new(project),

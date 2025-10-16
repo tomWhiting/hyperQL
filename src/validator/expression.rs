@@ -174,6 +174,11 @@ impl ExpressionValidator {
             Expression::Unary { op, expr } => {
                 self.validate_unary_expression(op, expr, type_checker, result)?;
             }
+            Expression::Between { expr, lower, upper, .. } => {
+                self.validate_expression_semantics(expr, type_checker, result)?;
+                self.validate_expression_semantics(lower, type_checker, result)?;
+                self.validate_expression_semantics(upper, type_checker, result)?;
+            }
             Expression::Column(col_ref) => {
                 self.validate_column_reference(col_ref, result);
                 // Record column usage
@@ -455,6 +460,9 @@ impl ExpressionValidator {
                         );
                     }
                 }
+            }
+            UnaryOperator::IsNull | UnaryOperator::IsNotNull => {
+                // IS NULL and IS NOT NULL can be applied to any type
             }
         }
 

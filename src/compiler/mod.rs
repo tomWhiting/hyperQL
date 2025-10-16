@@ -127,6 +127,7 @@ pub enum ExecutionPlan {
         table: String,
         filter: Option<CompiledExpression>,
         projection: Vec<CompiledProjection>,
+        limit: Option<u64>,
     },
     /// Filtered scan with WHERE clause
     Filter {
@@ -137,6 +138,7 @@ pub enum ExecutionPlan {
     Project {
         input: Box<ExecutionPlan>,
         expressions: Vec<CompiledProjection>,
+        distinct: bool,
     },
     /// Group by aggregation
     GroupBy {
@@ -538,7 +540,8 @@ mod tests {
         let compiled = compiler.compile(statement).unwrap();
 
         match compiled.plan {
-            ExecutionPlan::Project { input, .. } => {
+            ExecutionPlan::Project { input, distinct, .. } => {
+                assert!(!distinct, "DISTINCT should be false by default");
                 match *input {
                     ExecutionPlan::Scan { table, .. } => {
                         assert_eq!(table, "entities");

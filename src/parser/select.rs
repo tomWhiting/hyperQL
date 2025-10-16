@@ -8,8 +8,16 @@ pub fn parse_select_statement(input: &str) -> Result<Statement> {
 
     let mut parts = utils::split_query_parts(&upper_input, input);
 
-    let select_list = if let Some(select_part) = parts.remove("SELECT") {
-        parse_select_list(&select_part)?
+    let (select_list, distinct) = if let Some(select_part) = parts.remove("SELECT") {
+        let trimmed = select_part.trim();
+        let upper_trimmed = trimmed.to_uppercase();
+
+        if upper_trimmed.starts_with("DISTINCT ") {
+            let list_part = &trimmed[9..];
+            (parse_select_list(list_part)?, true)
+        } else {
+            (parse_select_list(trimmed)?, false)
+        }
     } else {
         return Err(HyperQLError::simple_parse_error(
             "Missing SELECT clause",
@@ -80,7 +88,7 @@ pub fn parse_select_statement(input: &str) -> Result<Statement> {
         order_by,
         limit,
         offset,
-        distinct: false,
+        distinct,
     }))
 }
 

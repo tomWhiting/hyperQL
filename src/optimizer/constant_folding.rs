@@ -26,7 +26,7 @@ impl ConstantFoldingOptimizer {
                     predicate: folded_predicate,
                 })
             }
-            ExecutionPlan::Project { input, expressions } => {
+            ExecutionPlan::Project { input, expressions, distinct } => {
                 let optimized_input = self.optimize_plan(*input)?;
                 let folded_expressions = expressions
                     .into_iter()
@@ -38,6 +38,7 @@ impl ConstantFoldingOptimizer {
                 Ok(ExecutionPlan::Project {
                     input: Box::new(optimized_input),
                     expressions: folded_expressions,
+                    distinct,
                 })
             }
             ExecutionPlan::GroupBy { input, group_expressions, aggregate_expressions } => {
@@ -89,7 +90,7 @@ impl ConstantFoldingOptimizer {
                     offset,
                 })
             }
-            ExecutionPlan::Scan { table, filter, projection } => {
+            ExecutionPlan::Scan { table, filter, projection, limit } => {
                 let folded_filter = filter.map(|f| self.fold_expression(f));
                 let folded_projection = projection
                     .into_iter()
@@ -102,6 +103,7 @@ impl ConstantFoldingOptimizer {
                     table,
                     filter: folded_filter,
                     projection: folded_projection,
+                    limit,
                 })
             }
             other => Ok(other),
@@ -521,6 +523,7 @@ mod tests {
                 result_type: ValueType::Bool,
             }),
             projection: vec![],
+            limit: None,
         };
 
         let optimized = optimize(scan).unwrap();

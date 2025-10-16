@@ -28,3 +28,43 @@
 2025-10-12 19:32:46,077 - mcp.server.lowlevel.server - INFO - Processing request of type ListToolsRequest
 2025-10-12 19:32:46,078 - mcp.server.lowlevel.server - INFO - Processing request of type ListPromptsRequest
 2025-10-12 19:32:46,078 - mcp.server.lowlevel.server - INFO - Processing request of type ListResourcesRequest
+2025-10-15 09:07:53,502 - task_net.mcp.servers.worker_manager - INFO - Received signal 15, initiating cleanup
+2025-10-15 09:07:53,533 - task_net.mcp.servers.worker_manager - INFO - Scheduled cleanup task in existing event loop
+2025-10-15 09:07:53,601 - task_net.mcp.servers.worker_manager - INFO - Cleaning up all workers on server shutdown
+2025-10-15 09:07:53,613 - task_net.persistence.libsql_client - ERROR - Query execution failed: cannot schedule new futures after interpreter shutdown
+2025-10-15 09:07:53,614 - task_net.mcp.servers.worker_manager - ERROR - Error during worker cleanup: Query execution failed: cannot schedule new futures after interpreter shutdown
+2025-10-15 09:07:53,615 - task_net.persistence.libsql_client - INFO - Disconnected from LibSQL
+2025-10-15 09:09:36,299 - task_net.mcp.run_server - INFO - Starting TaskNet MCP Worker Manager
+2025-10-15 09:09:36,299 - task_net.mcp.run_server - INFO - Project Directory: /Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL
+2025-10-15 09:09:36,299 - task_net.mcp.run_server - INFO - Database Path: /Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db
+2025-10-15 09:09:36,299 - task_net.mcp.run_server - INFO - Database URL: file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db
+2025-10-15 09:09:36,299 - task_net.mcp.run_server - INFO - PWD env: /Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL
+2025-10-15 09:09:36,299 - task_net.mcp.run_server - INFO - os.getcwd(): /Users/tom/Developer/spaces/projects/task-net/main/task-net
+2025-10-15 09:09:36,299 - task_net.mcp.run_server - INFO - Database file exists: True
+2025-10-15 09:09:36,299 - task_net.persistence.libsql_client - INFO - LibSQL client initialized for file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db
+2025-10-15 09:09:36,299 - task_net.persistence.libsql_client - INFO - Connecting to LibSQL (attempt 1/3)
+2025-10-15 09:09:36,302 - task_net.persistence.libsql_client - INFO - Successfully connected to LibSQL at file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db via file
+2025-10-15 09:09:36,304 - task_net.persistence.libsql_client - INFO - Disconnected from LibSQL
+2025-10-15 09:09:36,305 - task_net.mcp.run_server - INFO - Web backend already running on port 8742
+2025-10-15 09:09:40,333 - task_net.mcp.run_server - WARNING - Could not register project with backend after 5 attempts: Cannot connect to host localhost:8742 ssl:default [Multiple exceptions: [Errno 61] Connect call failed ('127.0.0.1', 8742), [Errno 61] Connect call failed ('::1', 8742, 0, 0)]
+2025-10-15 09:09:40,333 - task_net.persistence.libsql_client - INFO - LibSQL client initialized for file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db
+2025-10-15 09:09:40,333 - task_net.mcp.servers.worker_manager - INFO - Initializing database and starting services...
+2025-10-15 09:09:40,334 - task_net.persistence.libsql_client - INFO - Connecting to LibSQL (attempt 1/3)
+2025-10-15 09:09:40,334 - task_net.persistence.libsql_client - INFO - Successfully connected to LibSQL at file:/Users/tom/Developer/spaces/projects/hyperspatial/main/hyperQL/task_net.db via file
+2025-10-15 09:09:40,336 - task_net.persistence.libsql_client - ERROR - Query execution failed: duplicate column name: workflow_metadata
+2025-10-15 09:09:40,336 - task_net.persistence.libsql_client - ERROR - Query execution failed: duplicate column name: created_by
+2025-10-15 09:09:40,337 - task_net.mcp.servers.worker_manager - INFO - Database schema initialized successfully
+2025-10-15 09:09:40,337 - task_net.mcp.servers.worker_manager - INFO - Started worker health check service
+2025-10-15 09:09:40,337 - task_net.mcp.servers.worker_manager - INFO - Database initialized on MCP server startup
+2025-10-15 09:09:40,337 - task_net.mcp.servers.worker_manager - INFO - Synchronizing existing workers with database after MCP restart...
+2025-10-15 09:09:40,337 - task_net.mcp.servers.worker_manager - INFO - Synchronized 0 active workers with database
+2025-10-15 09:09:40,337 - task_net.mcp.servers.worker_manager - INFO - Waiting 30 seconds before first health check...
+2025-10-15 09:09:40,349 - mcp.server.lowlevel.server - INFO - Processing request of type ListToolsRequest
+2025-10-15 09:09:40,350 - mcp.server.lowlevel.server - INFO - Processing request of type ListPromptsRequest
+2025-10-15 09:09:40,350 - mcp.server.lowlevel.server - INFO - Processing request of type ListResourcesRequest
+2025-10-15 11:47:10,911 - task_net.mcp.servers.worker_manager - INFO - Received signal 15, initiating cleanup
+2025-10-15 11:47:10,912 - task_net.mcp.servers.worker_manager - INFO - Scheduled cleanup task in existing event loop
+2025-10-15 11:47:10,960 - task_net.mcp.servers.worker_manager - INFO - Cleaning up all workers on server shutdown
+2025-10-15 11:47:10,960 - task_net.persistence.libsql_client - ERROR - Query execution failed: cannot schedule new futures after interpreter shutdown
+2025-10-15 11:47:10,960 - task_net.mcp.servers.worker_manager - ERROR - Error during worker cleanup: Query execution failed: cannot schedule new futures after interpreter shutdown
+2025-10-15 11:47:10,960 - task_net.persistence.libsql_client - INFO - Disconnected from LibSQL
