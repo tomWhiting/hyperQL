@@ -21,6 +21,7 @@ mod clause;
 mod traverse;
 mod utils;
 mod geometric;
+mod vector;
 mod schema;
 
 
@@ -29,3 +30,6 @@ pub use statement::parse_statement;
 
 /// Parse geometric expressions (NEAR, WITHIN, DISTANCE)
 pub use geometric::{parse_near_expression, parse_distance_expression};
+
+/// Parse vector expressions (SIMILARITY, DISTANCE, SIMILAR TO)
+pub use vector::{parse_similarity_function, parse_distance_function, parse_similar_to_expression};

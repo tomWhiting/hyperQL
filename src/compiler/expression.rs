@@ -228,27 +228,39 @@ impl ExpressionCompiler {
     fn compile_vector_expression(&self, vector_expr: VectorExpression) -> Result<CompiledExpression> {
         match vector_expr {
             VectorExpression::Similarity { vector_name, reference, metric, threshold, vector_type } => {
+                self.validate_vector_name(&vector_name)?;
+
+                if let Some(thresh) = threshold {
+                    self.validate_threshold(thresh)?;
+                }
+
                 let compiled_vector_name = CompiledExpression::Literal(Value::String(vector_name));
                 let compiled_reference = self.compile_expression(*reference)?;
-                let compiled_metric = CompiledExpression::Literal(Value::String(format!("{:?}", metric)));
+                let compiled_metric = CompiledExpression::Literal(Value::String(self.metric_to_string(&metric)));
                 let compiled_threshold = match threshold {
                     Some(t) => CompiledExpression::Literal(Value::Float(t)),
                     None => CompiledExpression::Literal(Value::Null),
                 };
-                let compiled_vector_type = CompiledExpression::Literal(Value::String(format!("{:?}", vector_type)));
+                let compiled_vector_type = CompiledExpression::Literal(Value::String(self.vector_type_to_string(&vector_type)));
+
+                let op_type = self.metric_to_op_type(&metric);
+                let function_name = self.op_type_to_function_name(&op_type);
 
                 Ok(CompiledExpression::Function {
-                    name: "COSINE_SIMILARITY".to_string(),
+                    name: function_name,
                     args: vec![compiled_vector_name, compiled_reference, compiled_metric, compiled_threshold, compiled_vector_type],
                     result_type: ValueType::Float,
                 })
             }
             VectorExpression::KNN { vector_name, reference, k, metric, vector_type } => {
+                self.validate_vector_name(&vector_name)?;
+                self.validate_k(k)?;
+
                 let compiled_vector_name = CompiledExpression::Literal(Value::String(vector_name));
                 let compiled_reference = self.compile_expression(*reference)?;
                 let compiled_k = CompiledExpression::Literal(Value::Int(k as i64));
-                let compiled_metric = CompiledExpression::Literal(Value::String(format!("{:?}", metric)));
-                let compiled_vector_type = CompiledExpression::Literal(Value::String(format!("{:?}", vector_type)));
+                let compiled_metric = CompiledExpression::Literal(Value::String(self.metric_to_string(&metric)));
+                let compiled_vector_type = CompiledExpression::Literal(Value::String(self.vector_type_to_string(&vector_type)));
 
                 Ok(CompiledExpression::Function {
                     name: "KNN".to_string(),
@@ -258,10 +270,509 @@ impl ExpressionCompiler {
             }
         }
     }
+
+    fn validate_vector_name(&self, vector_name: &str) -> Result<()> {
+        if vector_name.is_empty() {
+            return Err(HyperQLError::ValidationError {
+                message: "Vector name cannot be empty".to_string(),
+                field: Some("vector_name".to_string()),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_threshold(&self, threshold: f64) -> Result<()> {
+        if !(-1.0..=1.0).contains(&threshold) {
+            return Err(HyperQLError::ValidationError {
+                message: format!("Similarity threshold must be between -1.0 and 1.0, got {}", threshold),
+                field: Some("threshold".to_string()),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_k(&self, k: u32) -> Result<()> {
+        if k == 0 {
+            return Err(HyperQLError::ValidationError {
+                message: "k must be greater than 0 for KNN queries".to_string(),
+                field: Some("k".to_string()),
+            });
+        }
+        Ok(())
+    }
+
+    fn metric_to_op_type(&self, metric: &crate::ast::vector::similarity::SimilarityMetric) -> super::VectorOpType {
+        match metric {
+            crate::ast::vector::similarity::SimilarityMetric::Cosine => super::VectorOpType::CosineSimilarity,
+            crate::ast::vector::similarity::SimilarityMetric::Euclidean => super::VectorOpType::EuclideanDistance,
+            crate::ast::vector::similarity::SimilarityMetric::DotProduct => super::VectorOpType::DotProduct,
+            crate::ast::vector::similarity::SimilarityMetric::Manhattan => super::VectorOpType::EuclideanDistance,
+            crate::ast::vector::similarity::SimilarityMetric::Jaccard => super::VectorOpType::CosineSimilarity,
+            crate::ast::vector::similarity::SimilarityMetric::Custom(_) => super::VectorOpType::CosineSimilarity,
+        }
+    }
+
+    fn op_type_to_function_name(&self, op_type: &super::VectorOpType) -> String {
+        match op_type {
+            super::VectorOpType::CosineSimilarity => "COSINE_SIMILARITY".to_string(),
+            super::VectorOpType::EuclideanDistance => "EUCLIDEAN_DISTANCE".to_string(),
+            super::VectorOpType::DotProduct => "DOT_PRODUCT".to_string(),
+            super::VectorOpType::Normalize => "NORMALIZE".to_string(),
+            super::VectorOpType::KNN => "KNN".to_string(),
+            super::VectorOpType::SimilaritySearch => "SIMILARITY_SEARCH".to_string(),
+        }
+    }
+
+    fn metric_to_string(&self, metric: &crate::ast::vector::similarity::SimilarityMetric) -> String {
+        match metric {
+            crate::ast::vector::similarity::SimilarityMetric::Cosine => "cosine".to_string(),
+            crate::ast::vector::similarity::SimilarityMetric::Euclidean => "euclidean".to_string(),
+            crate::ast::vector::similarity::SimilarityMetric::DotProduct => "dotproduct".to_string(),
+            crate::ast::vector::similarity::SimilarityMetric::Manhattan => "manhattan".to_string(),
+            crate::ast::vector::similarity::SimilarityMetric::Jaccard => "jaccard".to_string(),
+            crate::ast::vector::similarity::SimilarityMetric::Custom(name) => name.clone(),
+        }
+    }
+
+    fn vector_type_to_string(&self, vector_type: &crate::ast::vector::similarity::VectorType) -> String {
+        match vector_type {
+            crate::ast::vector::similarity::VectorType::Dense { dimensions } => {
+                format!("Dense({})", dimensions)
+            }
+            crate::ast::vector::similarity::VectorType::Sparse { max_dimensions } => {
+                match max_dimensions {
+                    Some(max) => format!("Sparse({})", max),
+                    None => "Sparse".to_string(),
+                }
+            }
+            crate::ast::vector::similarity::VectorType::ColBERT { token_dimensions, max_tokens } => {
+                match max_tokens {
+                    Some(max) => format!("ColBERT({},{})", token_dimensions, max),
+                    None => format!("ColBERT({})", token_dimensions),
+                }
+            }
+        }
+    }
 }
 
 impl Default for ExpressionCompiler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::vector::similarity::{SimilarityMetric, VectorType};
+
+    #[test]
+    fn test_compile_cosine_similarity_expression() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "text_embedding".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query_vec".to_string()))),
+            metric: SimilarityMetric::Cosine,
+            threshold: Some(0.8),
+            vector_type: VectorType::Dense { dimensions: 768 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_ok(), "Cosine similarity compilation failed: {:?}", result.err());
+
+        let compiled = result.unwrap();
+        match compiled {
+            CompiledExpression::Function { name, args, result_type } => {
+                assert_eq!(name, "COSINE_SIMILARITY");
+                assert_eq!(args.len(), 5);
+                assert_eq!(result_type, ValueType::Float);
+            }
+            _ => panic!("Expected Function expression, got: {:?}", compiled),
+        }
+    }
+
+    #[test]
+    fn test_compile_euclidean_distance_expression() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "feature_vec".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("target".to_string()))),
+            metric: SimilarityMetric::Euclidean,
+            threshold: None,
+            vector_type: VectorType::Dense { dimensions: 512 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_ok(), "Euclidean distance compilation failed: {:?}", result.err());
+
+        let compiled = result.unwrap();
+        match compiled {
+            CompiledExpression::Function { name, result_type, .. } => {
+                assert_eq!(name, "EUCLIDEAN_DISTANCE");
+                assert_eq!(result_type, ValueType::Float);
+            }
+            _ => panic!("Expected Function expression"),
+        }
+    }
+
+    #[test]
+    fn test_compile_dot_product_expression() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "embedding".to_string(),
+            reference: Box::new(Expression::Column(ColumnRef {
+                table: None,
+                name: "ref_vec".to_string(),
+            })),
+            metric: SimilarityMetric::DotProduct,
+            threshold: Some(0.5),
+            vector_type: VectorType::Dense { dimensions: 256 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_ok(), "Dot product compilation failed: {:?}", result.err());
+
+        let compiled = result.unwrap();
+        match compiled {
+            CompiledExpression::Function { name, result_type, .. } => {
+                assert_eq!(name, "DOT_PRODUCT");
+                assert_eq!(result_type, ValueType::Float);
+            }
+            _ => panic!("Expected Function expression"),
+        }
+    }
+
+    #[test]
+    fn test_compile_knn_expression() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::KNN {
+            vector_name: "text_embedding".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            k: 10,
+            metric: SimilarityMetric::Cosine,
+            vector_type: VectorType::Dense { dimensions: 768 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_ok(), "KNN compilation failed: {:?}", result.err());
+
+        let compiled = result.unwrap();
+        match compiled {
+            CompiledExpression::Function { name, args, result_type } => {
+                assert_eq!(name, "KNN");
+                assert_eq!(args.len(), 5);
+                assert_eq!(result_type, ValueType::List(Box::new(ValueType::EntityId)));
+
+                if let CompiledExpression::Literal(Value::Int(k_val)) = &args[2] {
+                    assert_eq!(*k_val, 10);
+                } else {
+                    panic!("Expected k to be compiled as Int literal");
+                }
+            }
+            _ => panic!("Expected Function expression"),
+        }
+    }
+
+    #[test]
+    fn test_validate_empty_vector_name() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            metric: SimilarityMetric::Cosine,
+            threshold: None,
+            vector_type: VectorType::Dense { dimensions: 100 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_err(), "Empty vector name should fail validation");
+
+        match result.unwrap_err() {
+            HyperQLError::ValidationError { message, .. } => {
+                assert!(message.contains("Vector name cannot be empty"));
+            }
+            other => panic!("Expected ValidationError, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_validate_threshold_out_of_range() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "vec".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            metric: SimilarityMetric::Cosine,
+            threshold: Some(1.5),
+            vector_type: VectorType::Dense { dimensions: 100 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_err(), "Threshold > 1.0 should fail validation");
+
+        match result.unwrap_err() {
+            HyperQLError::ValidationError { message, .. } => {
+                assert!(message.contains("threshold must be between -1.0 and 1.0"));
+            }
+            other => panic!("Expected ValidationError, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_validate_threshold_negative_out_of_range() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "vec".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            metric: SimilarityMetric::Cosine,
+            threshold: Some(-1.5),
+            vector_type: VectorType::Dense { dimensions: 100 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_err(), "Threshold < -1.0 should fail validation");
+    }
+
+    #[test]
+    fn test_validate_k_zero() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::KNN {
+            vector_name: "vec".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            k: 0,
+            metric: SimilarityMetric::Cosine,
+            vector_type: VectorType::Dense { dimensions: 100 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_err(), "k = 0 should fail validation");
+
+        match result.unwrap_err() {
+            HyperQLError::ValidationError { message, .. } => {
+                assert!(message.contains("k must be greater than 0"));
+            }
+            other => panic!("Expected ValidationError, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_compile_sparse_vector() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "sparse_keywords".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            metric: SimilarityMetric::Jaccard,
+            threshold: None,
+            vector_type: VectorType::Sparse { max_dimensions: Some(10000) },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_ok(), "Sparse vector compilation failed: {:?}", result.err());
+
+        let compiled = result.unwrap();
+        match compiled {
+            CompiledExpression::Function { name, args, .. } => {
+                assert_eq!(name, "COSINE_SIMILARITY");
+
+                if let CompiledExpression::Literal(Value::String(vec_type)) = &args[4] {
+                    assert!(vec_type.contains("Sparse"));
+                } else {
+                    panic!("Expected vector_type to be String literal");
+                }
+            }
+            _ => panic!("Expected Function expression"),
+        }
+    }
+
+    #[test]
+    fn test_compile_colbert_vector() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "colbert_tokens".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            metric: SimilarityMetric::DotProduct,
+            threshold: None,
+            vector_type: VectorType::ColBERT {
+                token_dimensions: 128,
+                max_tokens: Some(64),
+            },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_ok(), "ColBERT vector compilation failed: {:?}", result.err());
+
+        let compiled = result.unwrap();
+        match compiled {
+            CompiledExpression::Function { name, args, .. } => {
+                assert_eq!(name, "DOT_PRODUCT");
+
+                if let CompiledExpression::Literal(Value::String(vec_type)) = &args[4] {
+                    assert!(vec_type.contains("ColBERT"));
+                    assert!(vec_type.contains("128"));
+                } else {
+                    panic!("Expected vector_type to be String literal");
+                }
+            }
+            _ => panic!("Expected Function expression"),
+        }
+    }
+
+    #[test]
+    fn test_compile_custom_metric() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::Similarity {
+            vector_name: "custom_vec".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            metric: SimilarityMetric::Custom("my_custom_metric".to_string()),
+            threshold: None,
+            vector_type: VectorType::Dense { dimensions: 512 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_ok(), "Custom metric compilation failed: {:?}", result.err());
+
+        let compiled = result.unwrap();
+        match compiled {
+            CompiledExpression::Function { args, .. } => {
+                if let CompiledExpression::Literal(Value::String(metric_name)) = &args[2] {
+                    assert_eq!(metric_name, "my_custom_metric");
+                } else {
+                    panic!("Expected metric to be String literal");
+                }
+            }
+            _ => panic!("Expected Function expression"),
+        }
+    }
+
+    #[test]
+    fn test_metric_to_op_type_mapping() {
+        let compiler = ExpressionCompiler::new();
+
+        assert!(matches!(
+            compiler.metric_to_op_type(&SimilarityMetric::Cosine),
+            super::super::VectorOpType::CosineSimilarity
+        ));
+
+        assert!(matches!(
+            compiler.metric_to_op_type(&SimilarityMetric::Euclidean),
+            super::super::VectorOpType::EuclideanDistance
+        ));
+
+        assert!(matches!(
+            compiler.metric_to_op_type(&SimilarityMetric::DotProduct),
+            super::super::VectorOpType::DotProduct
+        ));
+    }
+
+    #[test]
+    fn test_metric_to_string_conversion() {
+        let compiler = ExpressionCompiler::new();
+
+        assert_eq!(compiler.metric_to_string(&SimilarityMetric::Cosine), "cosine");
+        assert_eq!(compiler.metric_to_string(&SimilarityMetric::Euclidean), "euclidean");
+        assert_eq!(compiler.metric_to_string(&SimilarityMetric::DotProduct), "dotproduct");
+        assert_eq!(compiler.metric_to_string(&SimilarityMetric::Manhattan), "manhattan");
+        assert_eq!(compiler.metric_to_string(&SimilarityMetric::Jaccard), "jaccard");
+
+        let custom_metric = SimilarityMetric::Custom("test_metric".to_string());
+        assert_eq!(compiler.metric_to_string(&custom_metric), "test_metric");
+    }
+
+    #[test]
+    fn test_vector_type_to_string_conversion() {
+        let compiler = ExpressionCompiler::new();
+
+        assert_eq!(
+            compiler.vector_type_to_string(&VectorType::Dense { dimensions: 768 }),
+            "Dense(768)"
+        );
+
+        assert_eq!(
+            compiler.vector_type_to_string(&VectorType::Sparse { max_dimensions: Some(10000) }),
+            "Sparse(10000)"
+        );
+
+        assert_eq!(
+            compiler.vector_type_to_string(&VectorType::Sparse { max_dimensions: None }),
+            "Sparse"
+        );
+
+        assert_eq!(
+            compiler.vector_type_to_string(&VectorType::ColBERT {
+                token_dimensions: 128,
+                max_tokens: Some(64),
+            }),
+            "ColBERT(128,64)"
+        );
+
+        assert_eq!(
+            compiler.vector_type_to_string(&VectorType::ColBERT {
+                token_dimensions: 256,
+                max_tokens: None,
+            }),
+            "ColBERT(256)"
+        );
+    }
+
+    #[test]
+    fn test_compile_expression_with_vector() {
+        let compiler = ExpressionCompiler::new();
+
+        let expr = Expression::Vector(VectorExpression::Similarity {
+            vector_name: "embedding".to_string(),
+            reference: Box::new(Expression::Literal(Literal::Float(0.5))),
+            metric: SimilarityMetric::Cosine,
+            threshold: Some(0.7),
+            vector_type: VectorType::Dense { dimensions: 384 },
+        });
+
+        let result = compiler.compile_expression(expr);
+        assert!(result.is_ok(), "Vector expression compilation failed: {:?}", result.err());
+
+        match result.unwrap() {
+            CompiledExpression::Function { name, result_type, .. } => {
+                assert_eq!(name, "COSINE_SIMILARITY");
+                assert_eq!(result_type, ValueType::Float);
+            }
+            other => panic!("Expected Function expression, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_knn_with_large_k() {
+        let compiler = ExpressionCompiler::new();
+
+        let vector_expr = VectorExpression::KNN {
+            vector_name: "text_embedding".to_string(),
+            reference: Box::new(Expression::Literal(Literal::String("query".to_string()))),
+            k: 1000,
+            metric: SimilarityMetric::Cosine,
+            vector_type: VectorType::Dense { dimensions: 768 },
+        };
+
+        let result = compiler.compile_vector_expression(vector_expr);
+        assert!(result.is_ok(), "KNN with large k should compile successfully");
+
+        let compiled = result.unwrap();
+        match compiled {
+            CompiledExpression::Function { args, .. } => {
+                if let CompiledExpression::Literal(Value::Int(k_val)) = &args[2] {
+                    assert_eq!(*k_val, 1000);
+                } else {
+                    panic!("Expected k to be compiled as Int literal");
+                }
+            }
+            _ => panic!("Expected Function expression"),
+        }
     }
 }

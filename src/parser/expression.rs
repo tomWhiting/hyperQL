@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::error::*;
-use super::{utils, geometric};
+use super::{utils, geometric, vector};
 
 pub fn parse_simple_expression(input: &str) -> Result<Expression> {
     let input = input.trim();
@@ -9,6 +9,11 @@ pub fn parse_simple_expression(input: &str) -> Result<Expression> {
     let upper_input = input.to_uppercase();
     if upper_input.contains(" NEAR ") && upper_input.contains(" WITHIN ") {
         return geometric::parse_near_expression(input);
+    }
+
+    // Check for vector SIMILAR TO operator
+    if upper_input.contains(" SIMILAR TO ") && upper_input.contains(" THRESHOLD ") {
+        return vector::parse_similar_to_expression(input);
     }
 
     // Check for IS NULL / IS NOT NULL
@@ -66,14 +71,19 @@ pub fn parse_simple_expression(input: &str) -> Result<Expression> {
             let left_part = &input[..op_pos];
             let right_part = &input[op_pos + op_str.len()..];
 
-            // Try parsing as arithmetic expression first, fallback to simple column/literal
-            let left = if left_part.contains('+') || left_part.contains('-') || left_part.contains('*') || left_part.contains('/') {
+            // Parse left side - handle functions, arithmetic, or simple literals
+            let left = if left_part.contains('(') {
+                parse_expression_or_function(left_part)?
+            } else if left_part.contains('+') || left_part.contains('-') || left_part.contains('*') || left_part.contains('/') {
                 parse_arithmetic_expression(left_part)?
             } else {
                 parse_simple_column_or_literal(left_part)?
             };
 
-            let right = if right_part.contains('+') || right_part.contains('-') || right_part.contains('*') || right_part.contains('/') {
+            // Parse right side - handle functions, arithmetic, or simple literals
+            let right = if right_part.contains('(') {
+                parse_expression_or_function(right_part)?
+            } else if right_part.contains('+') || right_part.contains('-') || right_part.contains('*') || right_part.contains('/') {
                 parse_arithmetic_expression(right_part)?
             } else {
                 parse_simple_column_or_literal(right_part)?
@@ -159,19 +169,28 @@ pub fn parse_literal_expression(input: &str) -> Result<Expression> {
 
 pub fn parse_expression_or_function(input: &str) -> Result<Expression> {
     let input = input.trim();
-    
+
     if let Some(paren_pos) = input.find('(') {
-        let func_name = input[..paren_pos].trim();
-        
-        if utils::is_aggregate_function(func_name) {
+        let func_name = input[..paren_pos].trim().to_uppercase();
+
+        // Check for vector functions
+        if func_name == "SIMILARITY" {
+            return vector::parse_similarity_function(input);
+        }
+
+        if func_name == "DISTANCE" {
+            return vector::parse_distance_function(input);
+        }
+
+        if utils::is_aggregate_function(&func_name) {
             return parse_function_call(input);
         }
     }
-    
+
     if input.contains('+') || input.contains('-') || input.contains('*') || input.contains('/') {
         return parse_arithmetic_expression(input);
     }
-    
+
     parse_simple_column_or_literal(input)
 }
 

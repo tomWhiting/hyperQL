@@ -273,7 +273,8 @@ fn parse_select_list(input: &str) -> Result<Vec<SelectItem>> {
     }
 
     let mut items = Vec::new();
-    for part in input.split(',') {
+    // Split by comma, but respect parentheses and quotes
+    for part in split_select_items(input) {
         let part = part.trim();
         if part.is_empty() {
             continue;
@@ -309,4 +310,43 @@ fn parse_select_list(input: &str) -> Result<Vec<SelectItem>> {
     }
 
     Ok(items)
+}
+
+/// Split SELECT list items by comma, respecting parentheses and quotes
+fn split_select_items(input: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let mut current_start = 0;
+    let mut paren_depth = 0;
+    let mut in_quote = false;
+    let mut quote_char = '"';
+    let chars: Vec<char> = input.chars().collect();
+
+    for i in 0..chars.len() {
+        let ch = chars[i];
+
+        match ch {
+            '\'' | '"' if i == 0 || chars[i - 1] != '\\' => {
+                if !in_quote {
+                    in_quote = true;
+                    quote_char = ch;
+                } else if ch == quote_char {
+                    in_quote = false;
+                }
+            }
+            '(' if !in_quote => paren_depth += 1,
+            ')' if !in_quote => paren_depth -= 1,
+            ',' if !in_quote && paren_depth == 0 => {
+                items.push(&input[current_start..i]);
+                current_start = i + 1;
+            }
+            _ => {}
+        }
+    }
+
+    // Add final item
+    if current_start < input.len() {
+        items.push(&input[current_start..]);
+    }
+
+    items
 }
