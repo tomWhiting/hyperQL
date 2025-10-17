@@ -536,10 +536,9 @@ impl SemanticValidator {
         match from_clause {
             FromClause::Table { collection, entity_type, .. } => {
                 // Store collection.entity_type as the table reference
-                let table_ref = if entity_type.is_empty() {
-                    collection.clone()
-                } else {
-                    format!("{}.{}", collection, entity_type)
+                let table_ref = match entity_type {
+                    Some(et) => format!("{}.{}", collection, et),
+                    None => collection.clone(),
                 };
                 result.metadata.tables_referenced.push(table_ref);
             }
@@ -572,7 +571,7 @@ mod tests {
             }],
             from: Some(FromClause::Table {
                 collection: "users".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),
@@ -651,7 +650,7 @@ mod tests {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
                 collection: "users".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),

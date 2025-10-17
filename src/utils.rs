@@ -222,7 +222,7 @@ pub mod query_utils {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
                 collection: "entities".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: Some(start.to_string()),
             }),
             joins: Vec::new(),
@@ -442,7 +442,7 @@ pub mod query_utils {
             select_list: select_items,
             from: Some(FromClause::Table {
                 collection: table.to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),

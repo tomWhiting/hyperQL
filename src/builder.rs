@@ -77,9 +77,9 @@ impl HyperQLBuilder {
                 // Parse table string - support both "collection" and "collection.entity_type" formats
                 let (collection, entity_type) = if let Some(dot_pos) = table.find('.') {
                     let (coll, et) = table.split_at(dot_pos);
-                    (coll.to_string(), et[1..].to_string())
+                    (coll.to_string(), Some(et[1..].to_string()))
                 } else {
-                    (table.to_string(), String::new())
+                    (table.to_string(), None)
                 };
 
                 select_stmt.from = Some(FromClause::Table {

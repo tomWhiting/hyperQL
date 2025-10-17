@@ -137,19 +137,27 @@ fn parse_from_and_joins(from_part: &str) -> Result<(Option<FromClause>, Vec<Join
         let parts: Vec<&str> = from_text.split_whitespace().collect();
         let table_ref = parts[0];
 
-        // Parse collection.type format
+        // Parse collection or collection.type format
         let table_parts: Vec<&str> = table_ref.split('.').collect();
-        if table_parts.len() != 2 {
-            return Err(HyperQLError::simple_parse_error(
-                "Table name must be in format 'collection.type' (e.g., 'mimic.Patient')",
-                from_part,
-                1,
-                1,
-            ));
-        }
+        let (collection, entity_type) = match table_parts.len() {
+            1 => {
+                // Single part: collection only
+                (table_parts[0].to_string(), None)
+            }
+            2 => {
+                // Two parts: collection.type
+                (table_parts[0].to_string(), Some(table_parts[1].to_string()))
+            }
+            _ => {
+                return Err(HyperQLError::simple_parse_error(
+                    "Table name must be in format 'collection' or 'collection.type' (e.g., 'mimic' or 'mimic.Patient')",
+                    from_part,
+                    1,
+                    1,
+                ));
+            }
+        };
 
-        let collection = table_parts[0].to_string();
-        let entity_type = table_parts[1].to_string();
         let alias = if parts.len() > 1 && parts[1].to_uppercase() != "JOIN" {
             Some(parts[1].to_string())
         } else {
@@ -214,19 +222,27 @@ fn parse_from_and_joins(from_part: &str) -> Result<(Option<FromClause>, Vec<Join
 
         let table_ref = parts[0];
 
-        // Parse collection.type format
+        // Parse collection or collection.type format
         let table_parts: Vec<&str> = table_ref.split('.').collect();
-        if table_parts.len() != 2 {
-            return Err(HyperQLError::simple_parse_error(
-                "JOIN table name must be in format 'collection.type' (e.g., 'mimic.Patient')",
-                join_text,
-                1,
-                1,
-            ));
-        }
+        let (collection, entity_type) = match table_parts.len() {
+            1 => {
+                // Single part: collection only
+                (table_parts[0].to_string(), None)
+            }
+            2 => {
+                // Two parts: collection.type
+                (table_parts[0].to_string(), Some(table_parts[1].to_string()))
+            }
+            _ => {
+                return Err(HyperQLError::simple_parse_error(
+                    "JOIN table name must be in format 'collection' or 'collection.type' (e.g., 'mimic' or 'mimic.Patient')",
+                    join_text,
+                    1,
+                    1,
+                ));
+            }
+        };
 
-        let collection = table_parts[0].to_string();
-        let entity_type = table_parts[1].to_string();
         let alias = if parts.len() > 1 {
             Some(parts[1].to_string())
         } else {

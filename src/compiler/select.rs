@@ -106,7 +106,9 @@ impl SelectCompiler {
     fn create_base_scan(&self, select: &SelectStatement) -> Result<ExecutionPlan> {
         let (table_name, entity_type, alias) = match &select.from {
             Some(FromClause::Table { collection, entity_type, alias }) => {
-                (collection.clone(), entity_type.clone(), alias.clone())
+                // Convert Option<String> to String (use empty string when None)
+                let entity_type_str = entity_type.as_ref().map(|s| s.clone()).unwrap_or_default();
+                (collection.clone(), entity_type_str, alias.clone())
             }
             Some(FromClause::Subquery { .. }) => {
                 return Err(HyperQLError::SemanticError {
@@ -276,10 +278,13 @@ impl SelectCompiler {
         let mut current_plan = left_plan;
 
         for join_clause in joins {
+            // Convert Option<String> to String (use empty string when None)
+            let entity_type_str = join_clause.entity_type.as_ref().map(|s| s.clone()).unwrap_or_default();
+
             // Create scan plan for the right table with alias
             let right_plan = ExecutionPlan::Scan {
                 table: join_clause.collection.clone(),
-                entity_type: join_clause.entity_type.clone(),
+                entity_type: entity_type_str,
                 alias: join_clause.alias.clone(),
                 filter: None,
                 projection: vec![],

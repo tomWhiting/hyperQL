@@ -474,8 +474,8 @@ mod tests {
         };
 
         let (left_key, right_key) = JoinExecutor::extract_join_keys(&condition).unwrap();
-        assert_eq!(left_key, "a.id");
-        assert_eq!(right_key, "b.id");
+        assert_eq!(left_key, "a_id");
+        assert_eq!(right_key, "b_id");
     }
 
     #[test]

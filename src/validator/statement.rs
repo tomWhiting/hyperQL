@@ -257,10 +257,9 @@ impl StatementValidator {
                 }
 
                 // Build table reference for alias comparison
-                let table_ref = if entity_type.is_empty() {
-                    collection.clone()
-                } else {
-                    format!("{}.{}", collection, entity_type)
+                let table_ref = match entity_type {
+                    Some(et) => format!("{}.{}", collection, et),
+                    None => collection.clone(),
                 };
 
                 // Check if alias conflicts with table name
@@ -631,7 +630,7 @@ mod tests {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
                 collection: "users".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),

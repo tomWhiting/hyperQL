@@ -186,10 +186,10 @@ pub enum SelectItem {
 /// FROM clause sources
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FromClause {
-    /// Simple table/entity reference with qualified name (collection.type)
+    /// Simple table/entity reference with qualified name (collection or collection.type)
     Table {
         collection: String,
-        entity_type: String,
+        entity_type: Option<String>,
         alias: Option<String>,
     },
     /// Subquery as source
@@ -432,8 +432,8 @@ pub struct JoinClause {
     pub join_type: JoinType,
     /// Collection to join with
     pub collection: String,
-    /// Entity type to join with
-    pub entity_type: String,
+    /// Entity type to join with (optional for collection-wide joins)
+    pub entity_type: Option<String>,
     /// Optional alias
     pub alias: Option<String>,
     /// JOIN condition (ON expression)

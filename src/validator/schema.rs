@@ -72,10 +72,9 @@ impl SchemaValidator {
             match from_clause {
                 FromClause::Table { collection, entity_type, .. } => {
                     // Build table reference name for schema lookup
-                    let table_ref = if entity_type.is_empty() {
-                        collection.clone()
-                    } else {
-                        format!("{}.{}", collection, entity_type)
+                    let table_ref = match entity_type {
+                        Some(et) => format!("{}.{}", collection, et),
+                        None => collection.clone(),
                     };
                     self.validate_table_reference(&table_ref, result, schema);
                 }
@@ -209,10 +208,9 @@ impl SchemaValidator {
         match from_clause {
             FromClause::Table { collection, entity_type, .. } => {
                 // Build table reference name for schema lookup
-                let table_ref = if entity_type.is_empty() {
-                    collection.clone()
-                } else {
-                    format!("{}.{}", collection, entity_type)
+                let table_ref = match entity_type {
+                    Some(et) => format!("{}.{}", collection, et),
+                    None => collection.clone(),
                 };
                 if let Some(columns) = schema.get(&table_ref) {
                     available_columns.insert(table_ref, columns.clone());
@@ -580,7 +578,7 @@ mod tests {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
                 collection: "users".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),
@@ -612,7 +610,7 @@ mod tests {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
                 collection: "nonexistent".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),
@@ -651,7 +649,7 @@ mod tests {
             }],
             from: Some(FromClause::Table {
                 collection: "users".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),
@@ -689,7 +687,7 @@ mod tests {
             }],
             from: Some(FromClause::Table {
                 collection: "users".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),
@@ -734,7 +732,7 @@ mod tests {
             }],
             from: Some(FromClause::Table {
                 collection: "users".to_string(),
-                entity_type: String::new(),
+                entity_type: None,
                 alias: None,
             }),
             joins: Vec::new(),
