@@ -18,6 +18,11 @@ impl SelectCompiler {
     pub fn compile_select(&self, select: SelectStatement) -> Result<ExecutionPlan> {
         let mut plan = self.create_base_scan(&select)?;
 
+        // Handle JOINs after base scan
+        if !select.joins.is_empty() {
+            plan = self.compile_joins(plan, &select.joins)?;
+        }
+
         if let Some(traverse_clause) = select.traverse_clause {
             let compiled_patterns = self.compile_traverse_patterns(&traverse_clause.patterns)?;
             let traverse_plan = ExecutionPlan::Traverse {
@@ -99,8 +104,10 @@ impl SelectCompiler {
     }
 
     fn create_base_scan(&self, select: &SelectStatement) -> Result<ExecutionPlan> {
-        let table_name = match &select.from {
-            Some(FromClause::Table { name, .. }) => name.clone(),
+        let (table_name, entity_type, alias) = match &select.from {
+            Some(FromClause::Table { collection, entity_type, alias }) => {
+                (collection.clone(), entity_type.clone(), alias.clone())
+            }
             Some(FromClause::Subquery { .. }) => {
                 return Err(HyperQLError::SemanticError {
                     message: "Subqueries are not yet supported".to_string(),
@@ -129,6 +136,8 @@ impl SelectCompiler {
 
         Ok(ExecutionPlan::Scan {
             table: table_name,
+            entity_type,
+            alias,
             filter: None,
             projection: vec![],
             limit: scan_limit,
@@ -260,6 +269,36 @@ impl SelectCompiler {
             }
             _ => false,
         }
+    }
+
+    /// Compile JOIN clauses into execution plan
+    fn compile_joins(&self, left_plan: ExecutionPlan, joins: &[JoinClause]) -> Result<ExecutionPlan> {
+        let mut current_plan = left_plan;
+
+        for join_clause in joins {
+            // Create scan plan for the right table with alias
+            let right_plan = ExecutionPlan::Scan {
+                table: join_clause.collection.clone(),
+                entity_type: join_clause.entity_type.clone(),
+                alias: join_clause.alias.clone(),
+                filter: None,
+                projection: vec![],
+                limit: None,
+            };
+
+            // Compile the ON condition
+            let compiled_condition = self.expression_compiler.compile_expression(join_clause.on_condition.clone())?;
+
+            // Create JOIN plan
+            current_plan = ExecutionPlan::Join {
+                left: Box::new(current_plan),
+                right: Box::new(right_plan),
+                join_type: join_clause.join_type.clone(),
+                on_condition: compiled_condition,
+            };
+        }
+
+        Ok(current_plan)
     }
 }
 

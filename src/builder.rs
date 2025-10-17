@@ -51,6 +51,7 @@ impl HyperQLBuilder {
         let select_stmt = SelectStatement {
             select_list,
             from: None,
+            joins: Vec::new(),
             traverse_clause: None,
             where_clause: None,
             group_by: Vec::new(),
@@ -73,8 +74,17 @@ impl HyperQLBuilder {
 
         match &mut self.statement {
             Some(Statement::Select(select_stmt)) => {
+                // Parse table string - support both "collection" and "collection.entity_type" formats
+                let (collection, entity_type) = if let Some(dot_pos) = table.find('.') {
+                    let (coll, et) = table.split_at(dot_pos);
+                    (coll.to_string(), et[1..].to_string())
+                } else {
+                    (table.to_string(), String::new())
+                };
+
                 select_stmt.from = Some(FromClause::Table {
-                    name: table.to_string(),
+                    collection,
+                    entity_type,
                     alias: None,
                 });
             }

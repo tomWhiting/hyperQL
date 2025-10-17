@@ -65,7 +65,7 @@ impl PredicatePushdownOptimizer {
 
     fn push_predicate(&mut self, plan: ExecutionPlan, predicate: CompiledExpression) -> Result<ExecutionPlan> {
         match plan {
-            ExecutionPlan::Scan { table, filter, projection, limit } => {
+            ExecutionPlan::Scan { table, entity_type, alias, filter, projection, limit } => {
                 let merged_filter = match filter {
                     Some(existing_filter) => {
                         Some(self.merge_filters(existing_filter, predicate))
@@ -74,6 +74,8 @@ impl PredicatePushdownOptimizer {
                 };
                 Ok(ExecutionPlan::Scan {
                     table,
+                    entity_type,
+                    alias,
                     filter: merged_filter,
                     projection,
                     limit,
@@ -177,6 +179,8 @@ mod tests {
     fn create_simple_scan() -> ExecutionPlan {
         ExecutionPlan::Scan {
             table: "users".to_string(),
+            entity_type: String::new(),
+            alias: None,
             filter: None,
             projection: vec![],
             limit: None,

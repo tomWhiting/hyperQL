@@ -70,8 +70,14 @@ impl SchemaValidator {
         // Validate FROM clause table references
         if let Some(from_clause) = &select.from {
             match from_clause {
-                FromClause::Table { name, .. } => {
-                    self.validate_table_reference(name, result, schema);
+                FromClause::Table { collection, entity_type, .. } => {
+                    // Build table reference name for schema lookup
+                    let table_ref = if entity_type.is_empty() {
+                        collection.clone()
+                    } else {
+                        format!("{}.{}", collection, entity_type)
+                    };
+                    self.validate_table_reference(&table_ref, result, schema);
                 }
                 FromClause::Subquery { .. } => {
                     // TODO: Handle subquery validation
@@ -201,9 +207,15 @@ impl SchemaValidator {
         let mut available_columns = HashMap::new();
 
         match from_clause {
-            FromClause::Table { name, .. } => {
-                if let Some(columns) = schema.get(name) {
-                    available_columns.insert(name.clone(), columns.clone());
+            FromClause::Table { collection, entity_type, .. } => {
+                // Build table reference name for schema lookup
+                let table_ref = if entity_type.is_empty() {
+                    collection.clone()
+                } else {
+                    format!("{}.{}", collection, entity_type)
+                };
+                if let Some(columns) = schema.get(&table_ref) {
+                    available_columns.insert(table_ref, columns.clone());
                 }
             }
             FromClause::Subquery { .. } => {
@@ -567,9 +579,11 @@ mod tests {
         let select = SelectStatement {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
-                name: "users".to_string(),
+                collection: "users".to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![],
             having: None,
@@ -597,9 +611,11 @@ mod tests {
         let select = SelectStatement {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
-                name: "nonexistent".to_string(),
+                collection: "nonexistent".to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![],
             having: None,
@@ -634,9 +650,11 @@ mod tests {
                 alias: None,
             }],
             from: Some(FromClause::Table {
-                name: "users".to_string(),
+                collection: "users".to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![],
             having: None,
@@ -670,9 +688,11 @@ mod tests {
                 alias: None,
             }],
             from: Some(FromClause::Table {
-                name: "users".to_string(),
+                collection: "users".to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![],
             having: None,
@@ -713,9 +733,11 @@ mod tests {
                 alias: None,
             }],
             from: Some(FromClause::Table {
-                name: "users".to_string(),
+                collection: "users".to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![],
             having: None,

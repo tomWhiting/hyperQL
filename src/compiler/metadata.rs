@@ -132,6 +132,11 @@ impl MetadataGenerator {
                     }
                 }
             }
+            ExecutionPlan::Join { left, right, on_condition, .. } => {
+                self.collect_metadata(left, metadata);
+                self.collect_metadata(right, metadata);
+                self.collect_expression_metadata(on_condition, metadata);
+            }
             ExecutionPlan::GeometricOperation { params, input, .. } => {
                 metadata.requires_spatial_index = true;
                 for (_key, expr) in params {
@@ -306,6 +311,20 @@ impl CostEstimator {
                     estimated_cpu_cost: estimated_traversal_cost,
                     estimated_memory_mb: pattern_count * 20.0,
                     estimated_io_ops: (pattern_count * 100.0) as u64,
+                }
+            }
+            ExecutionPlan::Join { left, right, .. } => {
+                let left_cost = self.estimate_cost(left);
+                let right_cost = self.estimate_cost(right);
+
+                // Hash join cost estimate: O(N + M)
+                ExecutionCost {
+                    estimated_rows: left_cost.estimated_rows.max(right_cost.estimated_rows),
+                    estimated_cpu_cost: left_cost.estimated_cpu_cost + right_cost.estimated_cpu_cost +
+                                       (left_cost.estimated_rows as f64 + right_cost.estimated_rows as f64) * 0.001,
+                    estimated_memory_mb: left_cost.estimated_memory_mb + right_cost.estimated_memory_mb +
+                                        (right_cost.estimated_rows as f64 * 0.01),
+                    estimated_io_ops: left_cost.estimated_io_ops + right_cost.estimated_io_ops,
                 }
             }
             ExecutionPlan::GeometricOperation { input, .. } => {

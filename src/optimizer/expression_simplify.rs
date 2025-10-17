@@ -103,7 +103,7 @@ impl ExpressionSimplifyOptimizer {
                     offset,
                 })
             }
-            ExecutionPlan::Scan { table, filter, projection, limit } => {
+            ExecutionPlan::Scan { table, entity_type, alias, filter, projection, limit } => {
                 let simplified_filter = filter.map(|f| self.simplify_expression(f));
                 let simplified_projection = projection
                     .into_iter()
@@ -113,7 +113,9 @@ impl ExpressionSimplifyOptimizer {
                     })
                     .collect();
                 Ok(ExecutionPlan::Scan {
+                    entity_type,
                     table,
+                    alias,
                     filter: simplified_filter,
                     projection: simplified_projection,
                     limit,
@@ -572,6 +574,8 @@ mod tests {
     fn test_filter_removal_when_always_true() {
         let scan = ExecutionPlan::Scan {
             table: "users".to_string(),
+            entity_type: String::new(),
+            alias: None,
             filter: None,
             projection: vec![],
             limit: None,

@@ -348,8 +348,8 @@ fn plans_equivalent(plan1: &ExecutionPlan, plan2: &ExecutionPlan) -> bool {
     use std::mem;
 
     match (plan1, plan2) {
-        (ExecutionPlan::Scan { table: t1, filter: f1, projection: p1, limit: l1 },
-         ExecutionPlan::Scan { table: t2, filter: f2, projection: p2, limit: l2 }) => {
+        (ExecutionPlan::Scan { table: t1, entity_type: _et1, alias: _, filter: f1, projection: p1, limit: l1 },
+         ExecutionPlan::Scan { table: t2, entity_type: _et2, alias: _, filter: f2, projection: p2, limit: l2 }) => {
             t1 == t2 && expressions_equivalent(f1.as_ref(), f2.as_ref()) &&
             p1.len() == p2.len() && l1 == l2
         }
@@ -412,6 +412,8 @@ mod tests {
     fn create_simple_scan() -> ExecutionPlan {
         ExecutionPlan::Scan {
             table: "users".to_string(),
+            entity_type: String::new(),
+            alias: None,
             filter: None,
             projection: vec![],
             limit: None,

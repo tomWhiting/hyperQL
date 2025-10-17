@@ -151,6 +151,8 @@ pub struct SelectStatement {
     pub select_list: Vec<SelectItem>,
     /// FROM clause with table/entity sources
     pub from: Option<FromClause>,
+    /// JOIN clauses for multi-table queries
+    pub joins: Vec<JoinClause>,
     /// TRAVERSE clause for graph patterns
     pub traverse_clause: Option<TraverseClause>,
     /// WHERE clause for filtering
@@ -184,9 +186,10 @@ pub enum SelectItem {
 /// FROM clause sources
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FromClause {
-    /// Simple table/entity reference
+    /// Simple table/entity reference with qualified name (collection.type)
     Table {
-        name: String,
+        collection: String,
+        entity_type: String,
         alias: Option<String>,
     },
     /// Subquery as source
@@ -420,4 +423,32 @@ pub struct VariableLength {
     pub min_hops: Option<u32>,
     /// Maximum number of hops (optional, unlimited if None)
     pub max_hops: Option<u32>,
+}
+
+/// JOIN clause for combining data from multiple tables
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JoinClause {
+    /// Type of JOIN operation
+    pub join_type: JoinType,
+    /// Collection to join with
+    pub collection: String,
+    /// Entity type to join with
+    pub entity_type: String,
+    /// Optional alias
+    pub alias: Option<String>,
+    /// JOIN condition (ON expression)
+    pub on_condition: Expression,
+}
+
+/// Types of JOIN operations
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum JoinType {
+    /// INNER JOIN - returns only matching rows from both tables
+    Inner,
+    /// LEFT JOIN - returns all rows from left table, matching rows from right
+    Left,
+    /// RIGHT JOIN - returns all rows from right table, matching rows from left
+    Right,
+    /// FULL OUTER JOIN - returns all rows from both tables
+    FullOuter,
 }

@@ -245,20 +245,27 @@ impl StatementValidator {
     fn validate_from_clause(&self, from: &FromClause, result: &mut ValidationResult) -> Result<()> {
         // Basic FROM clause validation
         match from {
-            FromClause::Table { name, alias } => {
-                // Check for empty table name
-                if name.is_empty() {
+            FromClause::Table { collection, entity_type, alias } => {
+                // Check for empty collection name
+                if collection.is_empty() {
                     result.add_error(
                         ValidationError::new(
                             ValidationErrorKind::StructuralError,
-                            "Table name cannot be empty".to_string(),
+                            "Collection name cannot be empty".to_string(),
                         )
                     );
                 }
 
+                // Build table reference for alias comparison
+                let table_ref = if entity_type.is_empty() {
+                    collection.clone()
+                } else {
+                    format!("{}.{}", collection, entity_type)
+                };
+
                 // Check if alias conflicts with table name
                 if let Some(alias_name) = alias {
-                    if name == alias_name {
+                    if table_ref == *alias_name {
                         result.add_warning(
                             ValidationWarning::new(
                                 ValidationWarningKind::AmbiguousReference,
@@ -623,9 +630,11 @@ mod tests {
         let select = SelectStatement {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
-                name: "users".to_string(),
+                collection: "users".to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![],
             having: None,

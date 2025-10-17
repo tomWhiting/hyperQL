@@ -26,7 +26,9 @@ impl MemoryDataSource {
 }
 
 impl DataSource for MemoryDataSource {
-    fn scan(&self, table: &str) -> Result<Vec<Entity>> {
+    fn scan(&self, table: &str, _entity_type: &str) -> Result<Vec<Entity>> {
+        // For MemoryDataSource, we don't differentiate by entity_type (simple in-memory store)
+        // Just return all entities from the "collection" (table)
         Ok(self.entities.get(table).cloned().unwrap_or_else(Vec::new))
     }
 

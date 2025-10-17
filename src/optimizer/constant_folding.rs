@@ -90,7 +90,7 @@ impl ConstantFoldingOptimizer {
                     offset,
                 })
             }
-            ExecutionPlan::Scan { table, filter, projection, limit } => {
+            ExecutionPlan::Scan { table, entity_type, alias, filter, projection, limit } => {
                 let folded_filter = filter.map(|f| self.fold_expression(f));
                 let folded_projection = projection
                     .into_iter()
@@ -101,6 +101,8 @@ impl ConstantFoldingOptimizer {
                     .collect();
                 Ok(ExecutionPlan::Scan {
                     table,
+                    entity_type,
+                    alias,
                     filter: folded_filter,
                     projection: folded_projection,
                     limit,
@@ -507,6 +509,8 @@ mod tests {
     fn test_plan_optimization_with_constant_folding() {
         let scan = ExecutionPlan::Scan {
             table: "users".to_string(),
+            entity_type: String::new(),
+            alias: None,
             filter: Some(CompiledExpression::Binary {
                 left: Box::new(CompiledExpression::Column {
                     table: None,

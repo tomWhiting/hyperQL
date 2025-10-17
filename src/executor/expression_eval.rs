@@ -40,7 +40,7 @@ impl ExpressionEvaluator {
     pub fn evaluate_expression(&self, expr: &CompiledExpression, row: &ResultRow) -> Result<Value> {
         match expr {
             CompiledExpression::Literal(value) => Ok(value.clone()),
-            CompiledExpression::Column { name, .. } => {
+            CompiledExpression::Column { name, table, .. } => {
                 if name == "*" {
                     return Err(HyperQLError::simple_parse_error(
                         "Wildcard column '*' should be expanded at compile time, not evaluated at runtime",
@@ -49,14 +49,33 @@ impl ExpressionEvaluator {
                         1,
                     ));
                 }
-                row.columns.get(name)
-                    .cloned()
-                    .ok_or_else(|| HyperQLError::simple_parse_error(
-                        &format!("Column '{}' not found", name),
-                        "",
-                        1,
-                        1,
-                    ))
+
+                // Try different column name formats to handle both qualified and unqualified names
+                // 1. Try table-prefixed name (e.g., "p_age" for alias "p" and column "age")
+                // 2. Try bare column name (e.g., "age")
+                // 3. Try dot-qualified name (e.g., "p.age" - legacy format)
+                let lookup_keys = if let Some(table_name) = table {
+                    vec![
+                        format!("{}_{}", table_name, name),  // Alias prefix format: "p_age"
+                        name.clone(),                         // Bare name: "age"
+                        format!("{}.{}", table_name, name),  // Dot format: "p.age"
+                    ]
+                } else {
+                    vec![name.clone()]
+                };
+
+                for key in &lookup_keys {
+                    if let Some(value) = row.columns.get(key) {
+                        return Ok(value.clone());
+                    }
+                }
+
+                Err(HyperQLError::simple_parse_error(
+                    &format!("Column '{}' not found", name),
+                    "",
+                    1,
+                    1,
+                ))
             },
             CompiledExpression::Binary { left, op, right, .. } => {
                 let left_val = self.evaluate_expression(left, row)?;

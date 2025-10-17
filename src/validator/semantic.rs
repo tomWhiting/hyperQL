@@ -534,8 +534,14 @@ impl SemanticValidator {
     /// Collect table references for metadata
     fn collect_table_references(&self, from_clause: &FromClause, result: &mut ValidationResult) {
         match from_clause {
-            FromClause::Table { name, .. } => {
-                result.metadata.tables_referenced.push(name.clone());
+            FromClause::Table { collection, entity_type, .. } => {
+                // Store collection.entity_type as the table reference
+                let table_ref = if entity_type.is_empty() {
+                    collection.clone()
+                } else {
+                    format!("{}.{}", collection, entity_type)
+                };
+                result.metadata.tables_referenced.push(table_ref);
             }
             FromClause::Subquery { .. } => {
                 // TODO: Handle subquery table references
@@ -565,9 +571,11 @@ mod tests {
                 alias: None,
             }],
             from: Some(FromClause::Table {
-                name: "users".to_string(),
+                collection: "users".to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![], // No GROUP BY
             having: Some(Expression::Function {
@@ -598,6 +606,7 @@ mod tests {
                 alias: None,
             }],
             from: None,
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![],
             having: None,
@@ -641,9 +650,11 @@ mod tests {
         let select = SelectStatement {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
-                name: "users".to_string(),
+                collection: "users".to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             where_clause: None,
             group_by: vec![],
             having: None,

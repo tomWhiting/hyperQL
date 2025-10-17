@@ -6,6 +6,7 @@ use super::expression_eval::ExpressionEvaluator;
 use super::aggregation::AggregationEngine;
 use super::geometric::GeometricEngine;
 use super::vector::VectorEngine;
+use super::join::JoinExecutor;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -81,8 +82,8 @@ impl PlanExecutor {
 
     pub fn execute_plan(&mut self, plan: &ExecutionPlan) -> Result<Vec<ResultRow>> {
         match plan {
-            ExecutionPlan::Scan { table, filter, projection, limit } => {
-                self.execute_scan(table, filter.as_ref(), projection, *limit)
+            ExecutionPlan::Scan { table, entity_type, alias: _, filter, projection, limit } => {
+                self.execute_scan(table, entity_type, filter.as_ref(), projection, *limit)
             },
             ExecutionPlan::Filter { input, predicate } => {
                 self.execute_filter(input, predicate)
@@ -114,6 +115,9 @@ impl PlanExecutor {
             ExecutionPlan::Traverse { patterns } => {
                 self.execute_traverse(patterns)
             },
+            ExecutionPlan::Join { left, right, join_type, on_condition } => {
+                self.execute_join(left, right, join_type, on_condition)
+            },
             ExecutionPlan::GeometricOperation { op_type, params, input } => {
                 self.execute_geometric_operation(op_type, params, input.as_ref().map(|i| i.as_ref()))
             },
@@ -135,6 +139,7 @@ impl PlanExecutor {
     fn execute_scan(
         &mut self,
         table: &str,
+        entity_type: &str,
         filter: Option<&CompiledExpression>,
         projection: &[CompiledProjection],
         limit: Option<u64>
@@ -142,9 +147,9 @@ impl PlanExecutor {
         // CRITICAL OPTIMIZATION: Use scan_with_limit when limit is present
         // This enables early termination at the DataSource level for 60-110x speedup
         let entities = if let Some(limit_count) = limit {
-            self.data_source.scan_with_limit(table, limit_count as usize)?
+            self.data_source.scan_with_limit(table, entity_type, limit_count as usize)?
         } else {
-            self.data_source.scan(table)?
+            self.data_source.scan(table, entity_type)?
         };
         self.stats_collector.entities_scanned += entities.len() as u64;
 
@@ -292,10 +297,10 @@ impl PlanExecutor {
 
         if is_count_star {
             // Fast path: Use RouterDataSource.count_entities() instead of scan()
-            if let ExecutionPlan::Scan { table, filter, projection, limit } = input {
+            if let ExecutionPlan::Scan { table, entity_type, alias: _, filter, projection, limit } = input {
                 if filter.is_none() && projection.is_empty() && limit.is_none() {
                     // Simple COUNT(*) FROM table - use fast count
-                    let count = self.data_source.count_entities_fast(table)?;
+                    let count = self.data_source.count_entities_fast(table, entity_type)?;
 
                     let mut columns = HashMap::new();
                     let column_name = if let Some(ref alias) = aggregate_expressions[0].alias {
@@ -335,7 +340,7 @@ impl PlanExecutor {
 
     /// Check if input plan is a simple scan without filters
     fn is_simple_scan(&self, plan: &ExecutionPlan) -> bool {
-        matches!(plan, ExecutionPlan::Scan { filter, projection, limit, .. }
+        matches!(plan, ExecutionPlan::Scan { filter, projection, limit, table: _, entity_type: _, alias: _ }
             if filter.is_none() && projection.is_empty() && limit.is_none())
     }
 
@@ -387,6 +392,51 @@ impl PlanExecutor {
         Ok(vec![])
     }
 
+    fn execute_join(
+        &mut self,
+        left: &ExecutionPlan,
+        right: &ExecutionPlan,
+        join_type: &crate::compiler::JoinType,
+        on_condition: &CompiledExpression,
+    ) -> Result<Vec<ResultRow>> {
+        // Execute left and right plans
+        let left_rows = self.execute_plan(left)?;
+        let right_rows = self.execute_plan(right)?;
+
+        // Extract aliases from execution plans
+        let left_alias = Self::extract_alias_from_plan(left);
+        let right_alias = Self::extract_alias_from_plan(right);
+
+        // Perform JOIN using JoinExecutor with aliases
+        JoinExecutor::execute_join(
+            left_rows,
+            right_rows,
+            join_type,
+            on_condition,
+            &self.expression_evaluator,
+            &left_alias,
+            &right_alias,
+        )
+    }
+
+    /// Extract alias from an execution plan (walks down to the Scan node)
+    fn extract_alias_from_plan(plan: &ExecutionPlan) -> Option<String> {
+        match plan {
+            ExecutionPlan::Scan { alias, table, .. } => {
+                // Use alias if present, otherwise use table name
+                alias.clone().or_else(|| Some(table.clone()))
+            }
+            ExecutionPlan::Filter { input, .. } => Self::extract_alias_from_plan(input),
+            ExecutionPlan::Project { input, .. } => Self::extract_alias_from_plan(input),
+            ExecutionPlan::Sort { input, .. } => Self::extract_alias_from_plan(input),
+            ExecutionPlan::Limit { input, .. } => Self::extract_alias_from_plan(input),
+            ExecutionPlan::GroupBy { input, .. } => Self::extract_alias_from_plan(input),
+            ExecutionPlan::Having { input, .. } => Self::extract_alias_from_plan(input),
+            ExecutionPlan::Join { left, .. } => Self::extract_alias_from_plan(left),
+            _ => None,
+        }
+    }
+
     fn execute_traverse(&mut self, patterns: &[CompiledTraversePattern]) -> Result<Vec<ResultRow>> {
         if patterns.is_empty() {
             return Ok(vec![]);
@@ -398,8 +448,17 @@ impl PlanExecutor {
             let start_label = pattern.start_node.label.as_deref();
             let rel_type = pattern.relationship.rel_type.as_deref();
 
+            // For TRAVERSE, we need to support old single-label style temporarily
+            // TODO: Update TRAVERSE syntax to use collection.type format
             let start_entities = if let Some(label) = start_label {
-                self.data_source.scan(label)?
+                // Assume label is actually "collection.type" or just treat as type
+                let parts: Vec<&str> = label.split('.').collect();
+                if parts.len() == 2 {
+                    self.data_source.scan(parts[0], parts[1])?
+                } else {
+                    // Legacy: treat label as both collection and type
+                    self.data_source.scan(label, label)?
+                }
             } else {
                 vec![]
             };

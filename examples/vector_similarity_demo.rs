@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     data_source.insert("documents", entities)?;
     
     println!("Test Documents:");
-    let scan_result = data_source.scan("documents")?;
+    let scan_result = data_source.scan("documents", "")?;
     for entity in &scan_result {
         if let Some(Value::String(title)) = entity.properties.get(&PropertyName("title".to_string())) {
             if let Some(embedding) = &entity.embedding {

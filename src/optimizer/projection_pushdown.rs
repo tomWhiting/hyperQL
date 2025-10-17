@@ -65,11 +65,13 @@ impl ProjectionPushdownOptimizer {
         let required_columns = self.extract_required_columns(&expressions);
 
         match plan {
-            ExecutionPlan::Scan { table, filter, projection: _, limit } => {
+            ExecutionPlan::Scan { table, entity_type, alias, filter, projection: _, limit } => {
                 let new_projection = self.create_minimal_projection_for_columns(&required_columns);
                 Ok(ExecutionPlan::Project {
                     input: Box::new(ExecutionPlan::Scan {
                         table,
+                        entity_type,
+                        alias,
                         filter,
                         projection: new_projection,
                         limit,
@@ -128,10 +130,12 @@ impl ProjectionPushdownOptimizer {
 
     fn push_projection_with_required_columns(&mut self, plan: ExecutionPlan, required_columns: HashSet<String>) -> Result<ExecutionPlan> {
         match plan {
-            ExecutionPlan::Scan { table, filter, projection: _, limit } => {
+            ExecutionPlan::Scan { table, entity_type, alias, filter, projection: _, limit } => {
                 let new_projection = self.create_minimal_projection_for_columns(&required_columns);
                 Ok(ExecutionPlan::Scan {
                     table,
+                    entity_type,
+                    alias,
                     filter,
                     projection: new_projection,
                     limit,
@@ -247,6 +251,8 @@ mod tests {
     fn create_simple_scan() -> ExecutionPlan {
         ExecutionPlan::Scan {
             table: "users".to_string(),
+            entity_type: String::new(),
+            alias: None,
             filter: None,
             projection: vec![
                 create_column_projection("id"),

@@ -166,7 +166,7 @@ pub struct Relationship {
 }
 
 /// Query result row
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResultRow {
     pub columns: HashMap<String, Value>,
 }

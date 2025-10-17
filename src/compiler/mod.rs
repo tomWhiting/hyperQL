@@ -2,6 +2,9 @@ use crate::ast::*;
 use crate::error::*;
 use serde::{Deserialize, Serialize};
 
+// Re-export JoinType from AST for use in ExecutionPlan
+pub use crate::ast::JoinType;
+
 mod expression;
 mod select;
 mod statement;
@@ -125,6 +128,8 @@ pub enum ExecutionPlan {
     /// Sequential scan of entities
     Scan {
         table: String,
+        entity_type: String,
+        alias: Option<String>,
         filter: Option<CompiledExpression>,
         projection: Vec<CompiledProjection>,
         limit: Option<u64>,
@@ -182,6 +187,13 @@ pub enum ExecutionPlan {
     /// TRAVERSE operation for graph pattern matching
     Traverse {
         patterns: Vec<CompiledTraversePattern>,
+    },
+    /// JOIN operation for combining tables
+    Join {
+        left: Box<ExecutionPlan>,
+        right: Box<ExecutionPlan>,
+        join_type: JoinType,
+        on_condition: CompiledExpression,
     },
     /// Geometric operation plan
     GeometricOperation {
@@ -534,7 +546,7 @@ mod tests {
     #[test]
     fn test_compile_simple_select() {
         let compiler = Compiler::new();
-        let query = "SELECT * FROM entities";
+        let query = "SELECT * FROM test.Entity";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();
@@ -543,8 +555,9 @@ mod tests {
             ExecutionPlan::Project { input, distinct, .. } => {
                 assert!(!distinct, "DISTINCT should be false by default");
                 match *input {
-                    ExecutionPlan::Scan { table, .. } => {
-                        assert_eq!(table, "entities");
+                    ExecutionPlan::Scan { table, entity_type, .. } => {
+                        assert_eq!(table, "test");
+                        assert_eq!(entity_type, "Entity");
                     }
                     _ => panic!("Expected scan as input to project"),
                 }
@@ -556,7 +569,7 @@ mod tests {
     #[test]
     fn test_compile_select_with_where() {
         let compiler = Compiler::new();
-        let query = "SELECT name FROM entities WHERE name = 'Alice'";
+        let query = "SELECT name FROM test.Entity WHERE name = 'Alice'";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();
@@ -567,8 +580,9 @@ mod tests {
                 match *input {
                     ExecutionPlan::Filter { input, .. } => {
                         match *input {
-                            ExecutionPlan::Scan { table, .. } => {
-                                assert_eq!(table, "entities");
+                            ExecutionPlan::Scan { table, entity_type, .. } => {
+                                assert_eq!(table, "test");
+                                assert_eq!(entity_type, "Entity");
                             }
                             _ => panic!("Expected scan as input to filter"),
                         }
@@ -583,7 +597,7 @@ mod tests {
     #[test]
     fn test_compile_select_with_order_by_limit() {
         let compiler = Compiler::new();
-        let query = "SELECT * FROM entities ORDER BY name LIMIT 10";
+        let query = "SELECT * FROM test.Entity ORDER BY name LIMIT 10";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();
@@ -671,7 +685,7 @@ mod tests {
     #[test]
     fn test_compile_group_by_statement() {
         let compiler = Compiler::new();
-        let query = "SELECT category, COUNT(*) FROM products GROUP BY category";
+        let query = "SELECT category, COUNT(*) FROM shop.Product GROUP BY category";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();
@@ -688,7 +702,7 @@ mod tests {
     #[test]
     fn test_compile_having_statement() {
         let compiler = Compiler::new();
-        let query = "SELECT category, COUNT(*) FROM products GROUP BY category HAVING COUNT(*) > 5";
+        let query = "SELECT category, COUNT(*) FROM shop.Product GROUP BY category HAVING COUNT(*) > 5";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();
@@ -710,7 +724,7 @@ mod tests {
     #[test]
     fn test_compile_traverse_statement() {
         let compiler = Compiler::new();
-        let query = "SELECT * FROM users TRAVERSE (a:User)-[r:follows]->(b:User)";
+        let query = "SELECT * FROM social.User TRAVERSE (a:User)-[r:follows]->(b:User)";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();
@@ -739,7 +753,7 @@ mod tests {
     #[test]
     fn test_compile_variable_length_traverse() {
         let compiler = Compiler::new();
-        let query = "SELECT * FROM users TRAVERSE (a)-[follows*1..3]->(b)";
+        let query = "SELECT * FROM social.User TRAVERSE (a)-[follows*1..3]->(b)";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();
@@ -763,7 +777,7 @@ mod tests {
     #[test]
     fn test_compile_optional_relationship() {
         let compiler = Compiler::new();
-        let query = "SELECT * FROM users TRAVERSE (a)-[follows?]->(b)";
+        let query = "SELECT * FROM social.User TRAVERSE (a)-[follows?]->(b)";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();
@@ -785,7 +799,7 @@ mod tests {
     #[test]
     fn test_compile_multiple_traverse_patterns() {
         let compiler = Compiler::new();
-        let query = "SELECT * FROM users TRAVERSE (a)-[follows]->(b), (b)-[likes]->(c)";
+        let query = "SELECT * FROM social.User TRAVERSE (a)-[follows]->(b), (b)-[likes]->(c)";
         let statement = parse_statement(query).unwrap();
 
         let compiled = compiler.compile(statement).unwrap();

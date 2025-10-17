@@ -19,6 +19,7 @@ mod aggregation;
 mod data_source;
 mod geometric;
 mod vector;
+mod join;
 
 use crate::compiler::{CompiledExpression, CompiledAssignment};
 use crate::types::Entity;
@@ -31,8 +32,17 @@ pub use data_source::MemoryDataSource;
 
 /// Abstract data source trait
 pub trait DataSource: Send + Sync {
-    /// Scan entities from a table
-    fn scan(&self, table: &str) -> Result<Vec<Entity>>;
+    /// Scan entities from a collection of specific type
+    ///
+    /// # Parameters
+    ///
+    /// * `table` - Collection name
+    /// * `entity_type` - Entity type to scan within collection
+    ///
+    /// # Returns
+    ///
+    /// Vector of entities matching the specified type
+    fn scan(&self, table: &str, entity_type: &str) -> Result<Vec<Entity>>;
 
     /// Scan entities from a table with early termination after limit
     ///
@@ -41,14 +51,15 @@ pub trait DataSource: Send + Sync {
     ///
     /// # Performance Impact
     ///
-    /// For queries like `SELECT * FROM entities LIMIT 5` on a 10K entity collection:
+    /// For queries like `SELECT * FROM collection.type LIMIT 5` on a 10K entity collection:
     /// - Without optimization: Loads 10K entities + 10K property lookups (~60-110ms)
     /// - With optimization: Loads 5 entities + 5 property lookups (~1ms)
     /// - Speedup: 60-110x
     ///
     /// # Parameters
     ///
-    /// * `table` - Table name to scan
+    /// * `table` - Collection name to scan
+    /// * `entity_type` - Entity type to scan within collection
     /// * `limit` - Maximum number of entities to return
     ///
     /// # Returns
@@ -60,10 +71,10 @@ pub trait DataSource: Send + Sync {
     /// The default implementation uses `scan().into_iter().take(limit)` which is simple
     /// but NOT optimized (still loads all entities). Implementations should override this
     /// with database-level early termination for optimal performance.
-    fn scan_with_limit(&self, table: &str, limit: usize) -> Result<Vec<Entity>> {
+    fn scan_with_limit(&self, table: &str, entity_type: &str, limit: usize) -> Result<Vec<Entity>> {
         // Default: scan all then take limit (slow but correct)
         // Real implementations (RouterDataSource) override with early termination
-        Ok(self.scan(table)?.into_iter().take(limit).collect())
+        Ok(self.scan(table, entity_type)?.into_iter().take(limit).collect())
     }
 
     /// Insert entities into a table
@@ -106,15 +117,16 @@ pub trait DataSource: Send + Sync {
     ///
     /// # Parameters
     ///
-    /// * `table` - Table name to count entities in
+    /// * `table` - Collection name to count entities in
+    /// * `entity_type` - Entity type to count within collection
     ///
     /// # Returns
     ///
-    /// Number of entities in the table
-    fn count_entities_fast(&self, table: &str) -> Result<usize> {
+    /// Number of entities of the specified type in the collection
+    fn count_entities_fast(&self, table: &str, entity_type: &str) -> Result<usize> {
         // Default implementation: fall back to scan (slow but correct)
         // Real implementations (RouterDataSource) override this with fast database-level counting
-        Ok(self.scan(table)?.len())
+        Ok(self.scan(table, entity_type)?.len())
     }
 }
 

@@ -221,9 +221,11 @@ pub mod query_utils {
         let select_stmt = SelectStatement {
             select_list: vec![SelectItem::Wildcard],
             from: Some(FromClause::Table {
-                name: "entities".to_string(),
+                collection: "entities".to_string(),
+                entity_type: String::new(),
                 alias: Some(start.to_string()),
             }),
+            joins: Vec::new(),
             traverse_clause: Some(TraverseClause {
                 patterns: vec![traverse_pattern],
             }),
@@ -439,9 +441,11 @@ pub mod query_utils {
         let select_stmt = SelectStatement {
             select_list: select_items,
             from: Some(FromClause::Table {
-                name: table.to_string(),
+                collection: table.to_string(),
+                entity_type: String::new(),
                 alias: None,
             }),
+            joins: Vec::new(),
             traverse_clause: None,
             where_clause: None,
             group_by: vec![Expression::Column(ColumnRef {
