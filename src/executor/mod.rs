@@ -14,7 +14,7 @@
 //! - [`data_source`]: DataSource trait implementations
 
 mod plan_executor;
-mod expression_eval;
+pub mod expression_eval;
 mod aggregation;
 mod data_source;
 mod geometric;

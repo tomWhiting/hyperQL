@@ -2,7 +2,8 @@ use crate::ast::*;
 use crate::error::*;
 
 use super::expression::ExpressionCompiler;
-use super::{CompiledProjection, CompiledSortKey, CompiledExpression, ExecutionPlan};
+use super::{CompiledProjection, CompiledSortKey, CompiledExpression, ExecutionPlan, VectorOpType};
+use std::collections::HashMap;
 
 pub struct SelectCompiler {
     expression_compiler: ExpressionCompiler,
@@ -35,12 +36,21 @@ impl SelectCompiler {
             }
         }
 
+        // CRITICAL: Check for vector operations in WHERE clause
         if let Some(where_expr) = select.where_clause {
             let compiled_predicate = self.expression_compiler.compile_expression(where_expr)?;
-            plan = ExecutionPlan::Filter {
-                input: Box::new(plan),
-                predicate: compiled_predicate,
-            };
+
+            // Detect if this is a vector operation that should use VectorOperation plan
+            if self.is_vector_function(&compiled_predicate) {
+                // Generate VectorOperation plan instead of Filter plan
+                plan = self.create_vector_operation_plan(compiled_predicate, plan)?;
+            } else {
+                // Regular filter
+                plan = ExecutionPlan::Filter {
+                    input: Box::new(plan),
+                    predicate: compiled_predicate,
+                };
+            }
         }
 
         // Compile projections first to check for aggregate functions
@@ -84,12 +94,19 @@ impl SelectCompiler {
             };
         }
 
+        // CRITICAL: Check for vector operations in ORDER BY (k-NN pattern)
         if !select.order_by.is_empty() {
-            let sort_keys = self.compile_order_by(&select.order_by)?;
-            plan = ExecutionPlan::Sort {
-                input: Box::new(plan),
-                sort_keys,
-            };
+            // Check if ORDER BY uses a vector distance function (k-NN pattern)
+            if let Some(vector_plan) = self.try_create_knn_plan(&select.order_by, select.limit, plan.clone())? {
+                plan = vector_plan;
+            } else {
+                // Regular sort
+                let sort_keys = self.compile_order_by(&select.order_by)?;
+                plan = ExecutionPlan::Sort {
+                    input: Box::new(plan),
+                    sort_keys,
+                };
+            }
         }
 
         if let Some(limit) = select.limit {
@@ -304,6 +321,219 @@ impl SelectCompiler {
         }
 
         Ok(current_plan)
+    }
+
+    /// Check if an expression contains a vector function
+    fn is_vector_function(&self, expr: &CompiledExpression) -> bool {
+        match expr {
+            CompiledExpression::Function { name, args, .. } => {
+                // Check if this is a vector function
+                let is_vector = matches!(
+                    name.to_uppercase().as_str(),
+                    "COSINE_SIMILARITY" | "EUCLIDEAN_DISTANCE" |
+                    "DOT_PRODUCT" | "NORMALIZE" |
+                    "KNN" | "SIMILARITY_SEARCH"
+                );
+
+                if is_vector {
+                    return true;
+                }
+
+                // Recursively check args for nested vector functions
+                args.iter().any(|arg| self.is_vector_function(arg))
+            }
+            CompiledExpression::Binary { left, right, .. } => {
+                self.is_vector_function(left) || self.is_vector_function(right)
+            }
+            CompiledExpression::Unary { expr, .. } => {
+                self.is_vector_function(expr)
+            }
+            _ => false,
+        }
+    }
+
+    /// Extract the vector operation type from a function name
+    fn function_name_to_vector_op_type(&self, name: &str) -> Option<VectorOpType> {
+        match name.to_uppercase().as_str() {
+            "COSINE_SIMILARITY" => Some(VectorOpType::CosineSimilarity),
+            "EUCLIDEAN_DISTANCE" => Some(VectorOpType::EuclideanDistance),
+            "DOT_PRODUCT" => Some(VectorOpType::DotProduct),
+            "NORMALIZE" => Some(VectorOpType::Normalize),
+            "KNN" => Some(VectorOpType::KNN),
+            "SIMILARITY_SEARCH" => Some(VectorOpType::SimilaritySearch),
+            _ => None,
+        }
+    }
+
+    /// Extract the primary vector function from an expression tree
+    fn extract_vector_function(&self, expr: &CompiledExpression) -> Option<(VectorOpType, Vec<CompiledExpression>)> {
+        match expr {
+            CompiledExpression::Function { name, args, .. } => {
+                if let Some(op_type) = self.function_name_to_vector_op_type(name) {
+                    return Some((op_type, args.clone()));
+                }
+                // Search in arguments
+                for arg in args {
+                    if let Some(result) = self.extract_vector_function(arg) {
+                        return Some(result);
+                    }
+                }
+                None
+            }
+            CompiledExpression::Binary { left, right, .. } => {
+                // Check left first, then right
+                self.extract_vector_function(left)
+                    .or_else(|| self.extract_vector_function(right))
+            }
+            CompiledExpression::Unary { expr, .. } => {
+                self.extract_vector_function(expr)
+            }
+            _ => None,
+        }
+    }
+
+    /// Create a VectorOperation execution plan from a compiled expression
+    fn create_vector_operation_plan(
+        &self,
+        expr: CompiledExpression,
+        input: ExecutionPlan,
+    ) -> Result<ExecutionPlan> {
+        // Extract the vector function and its parameters
+        let (op_type, args) = self.extract_vector_function(&expr)
+            .ok_or_else(|| HyperQLError::SemanticError {
+                message: "No vector function found in expression".to_string(),
+                context: vec!["create_vector_operation_plan".to_string()],
+            })?;
+
+        // Build parameter map from function arguments
+        let mut params = HashMap::new();
+
+        // Map arguments based on operation type
+        match op_type {
+            VectorOpType::CosineSimilarity | VectorOpType::EuclideanDistance | VectorOpType::DotProduct => {
+                // These take: vector_name, reference, metric, threshold, vector_type
+                if args.len() >= 2 {
+                    params.insert("vector_name".to_string(), args[0].clone());
+                    params.insert("reference".to_string(), args[1].clone());
+                }
+                if args.len() >= 3 {
+                    params.insert("metric".to_string(), args[2].clone());
+                }
+                if args.len() >= 4 {
+                    params.insert("threshold".to_string(), args[3].clone());
+                }
+                if args.len() >= 5 {
+                    params.insert("vector_type".to_string(), args[4].clone());
+                }
+            }
+            VectorOpType::KNN => {
+                // KNN takes: vector_name, reference, k, metric, vector_type
+                if args.len() >= 3 {
+                    params.insert("vector_name".to_string(), args[0].clone());
+                    params.insert("reference".to_string(), args[1].clone());
+                    params.insert("k".to_string(), args[2].clone());
+                }
+                if args.len() >= 4 {
+                    params.insert("metric".to_string(), args[3].clone());
+                }
+                if args.len() >= 5 {
+                    params.insert("vector_type".to_string(), args[4].clone());
+                }
+            }
+            VectorOpType::Normalize => {
+                // Normalize takes: vector
+                if !args.is_empty() {
+                    params.insert("vector".to_string(), args[0].clone());
+                }
+            }
+            VectorOpType::SimilaritySearch => {
+                // SimilaritySearch takes similar args to KNN
+                if args.len() >= 2 {
+                    params.insert("vector_name".to_string(), args[0].clone());
+                    params.insert("reference".to_string(), args[1].clone());
+                }
+                if args.len() >= 3 {
+                    params.insert("metric".to_string(), args[2].clone());
+                }
+                if args.len() >= 4 {
+                    params.insert("threshold".to_string(), args[3].clone());
+                }
+            }
+        }
+
+        // Store the full expression for evaluation
+        params.insert("_full_expression".to_string(), expr);
+
+        Ok(ExecutionPlan::VectorOperation {
+            op_type,
+            params,
+            input: Some(Box::new(input)),
+        })
+    }
+
+    /// Try to create a k-NN plan from ORDER BY clause
+    /// This handles the pattern: ORDER BY distance_function(...) LIMIT k
+    fn try_create_knn_plan(
+        &self,
+        order_by: &[OrderByItem],
+        limit: Option<u64>,
+        input: ExecutionPlan,
+    ) -> Result<Option<ExecutionPlan>> {
+        // k-NN pattern requires exactly one ORDER BY expression
+        if order_by.len() != 1 {
+            return Ok(None);
+        }
+
+        // Compile the ORDER BY expression
+        let order_expr = self.expression_compiler.compile_expression(order_by[0].expr.clone())?;
+
+        // Check if it's a vector distance function
+        if !self.is_vector_function(&order_expr) {
+            return Ok(None);
+        }
+
+        // Extract the vector function
+        let (op_type, args) = match self.extract_vector_function(&order_expr) {
+            Some(result) => result,
+            None => return Ok(None),
+        };
+
+        // Only distance functions make sense for k-NN
+        if !matches!(op_type, VectorOpType::CosineSimilarity | VectorOpType::EuclideanDistance | VectorOpType::DotProduct) {
+            return Ok(None);
+        }
+
+        // Build KNN operation parameters
+        let mut params = HashMap::new();
+
+        if args.len() >= 2 {
+            params.insert("vector_name".to_string(), args[0].clone());
+            params.insert("reference".to_string(), args[1].clone());
+        }
+        if args.len() >= 3 {
+            params.insert("metric".to_string(), args[2].clone());
+        }
+        if args.len() >= 5 {
+            params.insert("vector_type".to_string(), args[4].clone());
+        }
+
+        // Add k from LIMIT clause
+        if let Some(k) = limit {
+            params.insert("k".to_string(), CompiledExpression::Literal(crate::types::Value::Int(k as i64)));
+        }
+
+        // Add sort direction (ASC for distance = nearest first)
+        let direction = match order_by[0].direction {
+            OrderDirection::Asc => "asc",
+            OrderDirection::Desc => "desc",
+        };
+        params.insert("direction".to_string(), CompiledExpression::Literal(crate::types::Value::String(direction.to_string())));
+
+        Ok(Some(ExecutionPlan::VectorOperation {
+            op_type: VectorOpType::KNN,
+            params,
+            input: Some(Box::new(input)),
+        }))
     }
 }
 

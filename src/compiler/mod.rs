@@ -820,4 +820,185 @@ mod tests {
             _ => panic!("Expected PROJECT plan with TRAVERSE input"),
         }
     }
+
+    #[test]
+    fn test_compile_vector_similarity_in_where() {
+        let compiler = Compiler::new();
+        // Use column reference instead of array literal (parser limitation)
+        let query = r#"SELECT * FROM docs.Document
+                       WHERE SIMILARITY(embedding, query_vec, 'cosine') > 0.8"#;
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Should generate VectorOperation plan (not Filter plan)
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::VectorOperation { op_type, params, input } => {
+                        assert!(matches!(op_type, VectorOpType::CosineSimilarity));
+                        assert!(params.contains_key("vector_name"));
+                        assert!(params.contains_key("reference"));
+                        assert!(input.is_some());
+                    }
+                    other => panic!("Expected VectorOperation as input to project, got: {:?}", other),
+                }
+            }
+            _ => panic!("Expected PROJECT plan with VectorOperation input"),
+        }
+    }
+
+    #[test]
+    fn test_compile_knn_query_with_order_by() {
+        let compiler = Compiler::new();
+        // Use SIMILARITY with column reference for ORDER BY
+        let query = r#"SELECT * FROM docs.Document
+                       ORDER BY SIMILARITY(embedding, query_vec, 'euclidean')
+                       LIMIT 10"#;
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Should generate VectorOperation with KNN type
+        match &compiled.plan {
+            ExecutionPlan::Limit { input, count, .. } => {
+                assert_eq!(*count, 10);
+                match input.as_ref() {
+                    ExecutionPlan::VectorOperation { op_type, params, .. } => {
+                        assert!(matches!(op_type, VectorOpType::KNN));
+                        assert!(params.contains_key("k"));
+                        assert!(params.contains_key("vector_name"));
+                        assert!(params.contains_key("reference"));
+                    }
+                    other => panic!("Expected VectorOperation for k-NN, got: {:?}", other),
+                }
+            }
+            _ => panic!("Expected LIMIT plan with VectorOperation input"),
+        }
+    }
+
+    #[test]
+    fn test_compile_cosine_similarity_function() {
+        let compiler = Compiler::new();
+        // SIMILARITY function with cosine metric
+        let query = r#"SELECT * FROM docs.Document
+                       WHERE SIMILARITY(text_embedding, query_vec, 'cosine') > 0.7"#;
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Verify VectorOperation is generated
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::VectorOperation { op_type, params, .. } => {
+                        assert!(matches!(op_type, VectorOpType::CosineSimilarity));
+
+                        // Check key parameters are captured
+                        assert!(params.contains_key("vector_name"), "Missing vector_name parameter");
+                        assert!(params.contains_key("reference"), "Missing reference parameter");
+                        assert!(params.contains_key("metric"), "Missing metric parameter");
+                    }
+                    other => panic!("Expected VectorOperation, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected PROJECT plan, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_compile_dot_product_function() {
+        let compiler = Compiler::new();
+        // SIMILARITY with dotproduct metric
+        let query = r#"SELECT * FROM docs.Document
+                       WHERE SIMILARITY(feature_vec, target_vec, 'dotproduct') > 0.5"#;
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::VectorOperation { op_type, .. } => {
+                        assert!(matches!(op_type, VectorOpType::DotProduct));
+                    }
+                    other => panic!("Expected VectorOperation, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected PROJECT plan, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_compile_euclidean_distance_function() {
+        let compiler = Compiler::new();
+        // DISTANCE/SIMILARITY with euclidean metric
+        let query = r#"SELECT * FROM docs.Document
+                       WHERE DISTANCE(embedding, query_vec, 'euclidean') < 2.0"#;
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::VectorOperation { op_type, .. } => {
+                        assert!(matches!(op_type, VectorOpType::EuclideanDistance));
+                    }
+                    other => panic!("Expected VectorOperation, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected PROJECT plan, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_regular_where_clause_not_vector() {
+        let compiler = Compiler::new();
+        let query = "SELECT * FROM docs.Document WHERE title = 'test'";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Should generate regular Filter plan (not VectorOperation)
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::Filter { .. } => {
+                        // Correct - regular filter for non-vector operations
+                    }
+                    ExecutionPlan::VectorOperation { .. } => {
+                        panic!("Should not generate VectorOperation for non-vector WHERE clause");
+                    }
+                    other => panic!("Expected Filter, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected PROJECT plan, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_regular_order_by_not_vector() {
+        let compiler = Compiler::new();
+        let query = "SELECT * FROM docs.Document ORDER BY created_at DESC LIMIT 10";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Should generate regular Sort plan (not VectorOperation)
+        match &compiled.plan {
+            ExecutionPlan::Limit { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::Sort { .. } => {
+                        // Correct - regular sort for non-vector ORDER BY
+                    }
+                    ExecutionPlan::VectorOperation { .. } => {
+                        panic!("Should not generate VectorOperation for non-vector ORDER BY");
+                    }
+                    other => panic!("Expected Sort, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected LIMIT plan, got: {:?}", other),
+        }
+    }
 }
