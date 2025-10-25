@@ -36,12 +36,15 @@ impl SelectCompiler {
             }
         }
 
-        // CRITICAL: Check for vector operations in WHERE clause
+        // CRITICAL: Check for vector/geometric operations in WHERE clause
         if let Some(where_expr) = select.where_clause {
             let compiled_predicate = self.expression_compiler.compile_expression(where_expr)?;
 
-            // Detect if this is a vector operation that should use VectorOperation plan
-            if self.is_vector_function(&compiled_predicate) {
+            // Detect if this is a geometric operation that should use GeometricOperation plan
+            if self.is_geometric_function(&compiled_predicate) {
+                // Generate GeometricOperation plan instead of Filter plan
+                plan = self.create_geometric_operation_plan(compiled_predicate, plan)?;
+            } else if self.is_vector_function(&compiled_predicate) {
                 // Generate VectorOperation plan instead of Filter plan
                 plan = self.create_vector_operation_plan(compiled_predicate, plan)?;
             } else {
@@ -142,14 +145,30 @@ impl SelectCompiler {
         };
 
         // CRITICAL OPTIMIZATION: Pass LIMIT down to Scan when query is simple enough
-        // Only push down LIMIT if there's no WHERE, ORDER BY, or GROUP BY
-        // (those operations need full result set before limiting)
+        // Push LIMIT to scan when it's safe for early termination
+        // Safe cases:
+        // 1. No WHERE/ORDER BY/GROUP BY/HAVING: Can stop after LIMIT entities
+        // 2. WHERE only (no ORDER BY/GROUP BY): Can stop after finding LIMIT matching entities
+        //
+        // NOT safe:
+        // - ORDER BY: Need all entities to sort correctly
+        // - GROUP BY: Need all entities to compute groups
+        // - HAVING: Need all groups to filter
         let scan_limit = if select.where_clause.is_none()
             && select.order_by.is_empty()
             && select.group_by.is_empty()
             && select.having.is_none() {
+            // No filtering/sorting/grouping: safe to push LIMIT
+            select.limit
+        } else if select.where_clause.is_some()
+            && select.order_by.is_empty()
+            && select.group_by.is_empty()
+            && select.having.is_none() {
+            // WHERE-only queries: push LIMIT for early termination
+            // The scan will stop after finding LIMIT matching entities
             select.limit
         } else {
+            // ORDER BY or GROUP BY present: need all data
             None
         };
 
@@ -209,8 +228,35 @@ impl SelectCompiler {
 
     fn generate_expression_name(&self, expr: &Expression) -> String {
         match expr {
-            Expression::Column(col_ref) => col_ref.name.clone(),
-            Expression::Function { name, .. } => name.clone(),
+            Expression::Column(col_ref) => {
+                // Include table prefix if present
+                if let Some(ref table) = col_ref.table {
+                    format!("{}.{}", table, col_ref.name)
+                } else {
+                    col_ref.name.clone()
+                }
+            }
+            Expression::Function { name, args } => {
+                // Generate proper function call syntax for better column naming
+                if args.is_empty() {
+                    // COUNT() with no args
+                    format!("{}(*)", name)
+                } else if args.len() == 1 {
+                    // Check if arg is a wildcard column reference
+                    if let Expression::Column(col_ref) = &args[0] {
+                        if col_ref.name == "*" {
+                            return format!("{}(*)", name);
+                        }
+                        // For column references, include the column name
+                        return format!("{}({})", name, self.generate_expression_name(&args[0]));
+                    }
+                    // For other single-arg functions
+                    format!("{}({})", name, self.generate_expression_name(&args[0]))
+                } else {
+                    // Multi-arg functions
+                    format!("{}(...)", name)
+                }
+            }
             Expression::Literal(literal) => format!("{:?}", literal),
             _ => "expr".to_string(),
         }
@@ -321,6 +367,162 @@ impl SelectCompiler {
         }
 
         Ok(current_plan)
+    }
+
+    /// Check if an expression contains a geometric function
+    fn is_geometric_function(&self, expr: &CompiledExpression) -> bool {
+        match expr {
+            CompiledExpression::Function { name, args, .. } => {
+                // Check if this is a geometric function
+                // Note: "near" and "distance" are parser-generated names (not from ExpressionCompiler)
+                let is_geometric = matches!(
+                    name.to_uppercase().as_str(),
+                    "HYPERBOLIC_DISTANCE" | "GEODESIC_DISTANCE" |
+                    "WITHIN_RADIUS" | "NEAR_POSITIONS" |
+                    "CONTAINS" | "INTERSECTS" |
+                    "NEAR" | "DISTANCE"  // Parser-generated geometric functions
+                );
+
+                if is_geometric {
+                    return true;
+                }
+
+                // Recursively check args for nested geometric functions
+                args.iter().any(|arg| self.is_geometric_function(arg))
+            }
+            CompiledExpression::Binary { left, right, .. } => {
+                self.is_geometric_function(left) || self.is_geometric_function(right)
+            }
+            CompiledExpression::Unary { expr, .. } => {
+                self.is_geometric_function(expr)
+            }
+            _ => false,
+        }
+    }
+
+    /// Extract the geometric operation type from a function name
+    fn function_name_to_geometric_op_type(&self, name: &str) -> Option<super::GeometricOpType> {
+        match name.to_uppercase().as_str() {
+            "HYPERBOLIC_DISTANCE" => Some(super::GeometricOpType::HyperbolicDistance),
+            "GEODESIC_DISTANCE" => Some(super::GeometricOpType::GeodesicDistance),
+            "WITHIN_RADIUS" => Some(super::GeometricOpType::WithinRadius),
+            "NEAR_POSITIONS" => Some(super::GeometricOpType::NearPositions),
+            "CONTAINS" => Some(super::GeometricOpType::Contains),
+            "INTERSECTS" => Some(super::GeometricOpType::Intersects),
+            // Parser-generated function names
+            "NEAR" => Some(super::GeometricOpType::NearPositions),
+            "DISTANCE" => Some(super::GeometricOpType::HyperbolicDistance),
+            _ => None,
+        }
+    }
+
+    /// Extract the primary geometric function from an expression tree
+    fn extract_geometric_function(&self, expr: &CompiledExpression) -> Option<(super::GeometricOpType, Vec<CompiledExpression>)> {
+        match expr {
+            CompiledExpression::Function { name, args, .. } => {
+                if let Some(op_type) = self.function_name_to_geometric_op_type(name) {
+                    return Some((op_type, args.clone()));
+                }
+                // Search in arguments
+                for arg in args {
+                    if let Some(result) = self.extract_geometric_function(arg) {
+                        return Some(result);
+                    }
+                }
+                None
+            }
+            CompiledExpression::Binary { left, right, .. } => {
+                // Check left first, then right
+                self.extract_geometric_function(left)
+                    .or_else(|| self.extract_geometric_function(right))
+            }
+            CompiledExpression::Unary { expr, .. } => {
+                self.extract_geometric_function(expr)
+            }
+            _ => None,
+        }
+    }
+
+    /// Create a GeometricOperation execution plan from a compiled expression
+    fn create_geometric_operation_plan(
+        &self,
+        expr: CompiledExpression,
+        input: ExecutionPlan,
+    ) -> Result<ExecutionPlan> {
+        // Extract the geometric function and its parameters
+        let (op_type, args) = self.extract_geometric_function(&expr)
+            .ok_or_else(|| HyperQLError::SemanticError {
+                message: "No geometric function found in expression".to_string(),
+                context: vec!["create_geometric_operation_plan".to_string()],
+            })?;
+
+        // Build parameter map from function arguments
+        let mut params = HashMap::new();
+
+        // Map arguments based on operation type
+        match op_type {
+            super::GeometricOpType::HyperbolicDistance | super::GeometricOpType::GeodesicDistance => {
+                // Parser-generated "distance" function: args = [reference]
+                // Compiled HYPERBOLIC_DISTANCE: args = [entity1, entity2]
+                if args.len() == 1 {
+                    // Parser format: distance(reference)
+                    // Create column reference for "position" and use reference as entity2
+                    params.insert("entity1".to_string(), CompiledExpression::Column {
+                        table: None,
+                        name: "position".to_string(),
+                        value_type: super::ValueType::Position,
+                    });
+                    params.insert("entity2".to_string(), args[0].clone());
+                } else if args.len() >= 2 {
+                    // Compiled format
+                    params.insert("entity1".to_string(), args[0].clone());
+                    params.insert("entity2".to_string(), args[1].clone());
+                }
+                // Optional third argument for max_distance in NEAR context
+                if args.len() >= 3 {
+                    params.insert("max_distance".to_string(), args[2].clone());
+                }
+            }
+            super::GeometricOpType::WithinRadius => {
+                // WITHIN_RADIUS takes: target, reference, radius
+                if args.len() >= 3 {
+                    params.insert("target".to_string(), args[0].clone());
+                    params.insert("center".to_string(), args[1].clone());
+                    params.insert("radius".to_string(), args[2].clone());
+                }
+            }
+            super::GeometricOpType::NearPositions => {
+                // Parser-generated "near" function: args = [reference, radius]
+                // Compiled NEAR_POSITIONS: args = [reference, limit]
+                if args.len() >= 2 {
+                    // Parser format: near(reference, radius)
+                    params.insert("reference".to_string(), args[0].clone());
+                    params.insert("radius".to_string(), args[1].clone());
+                } else if !args.is_empty() {
+                    // Compiled format
+                    params.insert("reference".to_string(), args[0].clone());
+                    if args.len() >= 2 {
+                        params.insert("limit".to_string(), args[1].clone());
+                    }
+                }
+            }
+            super::GeometricOpType::Contains | super::GeometricOpType::Intersects => {
+                // These take: geometry1, geometry2
+                if args.len() >= 2 {
+                    params.insert("geometry1".to_string(), args[0].clone());
+                    params.insert("geometry2".to_string(), args[1].clone());
+                }
+            }
+        }
+
+        // Store the full expression for evaluation
+        params.insert("_full_expression".to_string(), expr);
+
+        Ok(ExecutionPlan::GeometricOperation {
+            op_type,
+            params,
+            input: Some(Box::new(input)),
+        })
     }
 
     /// Check if an expression contains a vector function

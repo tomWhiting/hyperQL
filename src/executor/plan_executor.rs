@@ -133,6 +133,9 @@ impl PlanExecutor {
             ExecutionPlan::GraphOperation { op_type, params, input } => {
                 self.execute_graph_operation(op_type, params, input.as_ref().map(|i| i.as_ref()))
             },
+            ExecutionPlan::Schema { operation } => {
+                self.execute_schema(operation)
+            },
         }
     }
 
@@ -297,8 +300,9 @@ impl PlanExecutor {
 
         if is_count_star {
             // Fast path: Use RouterDataSource.count_entities() instead of scan()
-            if let ExecutionPlan::Scan { table, entity_type, alias: _, filter, projection, limit } = input {
-                if filter.is_none() && projection.is_empty() && limit.is_none() {
+            if let ExecutionPlan::Scan { table, entity_type, alias: _, filter, projection, limit: _ } = input {
+                // LIMIT is allowed in COUNT queries - it applies to result rows (always 1), not to the count
+                if filter.is_none() && projection.is_empty() {
                     // Simple COUNT(*) FROM table - use fast count
                     let count = self.data_source.count_entities_fast(table, entity_type)?;
 
@@ -339,9 +343,10 @@ impl PlanExecutor {
     }
 
     /// Check if input plan is a simple scan without filters
+    /// LIMIT is allowed - it applies to result rows, not to COUNT aggregation
     fn is_simple_scan(&self, plan: &ExecutionPlan) -> bool {
-        matches!(plan, ExecutionPlan::Scan { filter, projection, limit, table: _, entity_type: _, alias: _ }
-            if filter.is_none() && projection.is_empty() && limit.is_none())
+        matches!(plan, ExecutionPlan::Scan { filter, projection, limit: _, table: _, entity_type: _, alias: _ }
+            if filter.is_none() && projection.is_empty())
     }
 
     fn execute_having(&mut self, input: &ExecutionPlan, predicate: &CompiledExpression) -> Result<Vec<ResultRow>> {
@@ -687,6 +692,50 @@ impl PlanExecutor {
             },
             Value::Timestamp(ts) => HashableValue::Timestamp(*ts),
             Value::Duration(dur) => HashableValue::Duration(*dur),
+        }
+    }
+
+    fn execute_schema(&mut self, operation: &crate::ast::schema::SchemaOperation) -> Result<Vec<ResultRow>> {
+        use crate::ast::schema::SchemaOperation;
+
+        match operation {
+            SchemaOperation::Create(create_op) => {
+                self.data_source.create_schema(create_op)?;
+
+                let mut columns = HashMap::new();
+                columns.insert("status".to_string(), Value::String("Schema created successfully".to_string()));
+                columns.insert("collection".to_string(), Value::String(create_op.collection_name.clone()));
+                columns.insert("fields".to_string(), Value::Int(create_op.fields.len() as i64));
+
+                Ok(vec![ResultRow { columns }])
+            },
+            SchemaOperation::Drop(drop_op) => {
+                self.data_source.drop_schema(drop_op)?;
+
+                let mut columns = HashMap::new();
+                columns.insert("status".to_string(), Value::String("Schema dropped successfully".to_string()));
+                columns.insert("collection".to_string(), Value::String(drop_op.collection_name.clone()));
+
+                Ok(vec![ResultRow { columns }])
+            },
+            SchemaOperation::Alter(alter_op) => {
+                self.data_source.alter_schema(alter_op)?;
+
+                let mut columns = HashMap::new();
+                columns.insert("status".to_string(), Value::String("Schema altered successfully".to_string()));
+                columns.insert("collection".to_string(), Value::String(alter_op.collection_name.clone()));
+
+                Ok(vec![ResultRow { columns }])
+            },
+            SchemaOperation::Describe(describe_op) => {
+                let schema_info = self.data_source.describe_schema(describe_op)?;
+
+                let mut columns = HashMap::new();
+                columns.insert("collection".to_string(), Value::String(describe_op.collection_name.clone()));
+                columns.insert("schema".to_string(), Value::String(schema_info));
+
+                Ok(vec![ResultRow { columns }])
+            },
         }
     }
 }

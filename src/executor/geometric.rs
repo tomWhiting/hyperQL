@@ -205,20 +205,112 @@ impl GeometricEngine {
 
     fn execute_contains(
         &self,
-        _params: &HashMap<String, CompiledExpression>,
-        _rows: Vec<ResultRow>,
-        _evaluator: &mut ExpressionEvaluator,
+        params: &HashMap<String, CompiledExpression>,
+        rows: Vec<ResultRow>,
+        evaluator: &mut ExpressionEvaluator,
     ) -> Result<Vec<ResultRow>> {
-        Err(HyperQLError::ExecutionError { message: "Contains operation not yet implemented".to_string(), operation: "geometric_operation".to_string(), entity_context: None })
+        let geometry1_expr = params.get("geometry1")
+            .ok_or_else(|| HyperQLError::ExecutionError {
+                message: "Missing 'geometry1' parameter for contains".to_string(),
+                operation: "contains".to_string(),
+                entity_context: None,
+            })?;
+        let geometry2_expr = params.get("geometry2")
+            .ok_or_else(|| HyperQLError::ExecutionError {
+                message: "Missing 'geometry2' parameter for contains".to_string(),
+                operation: "contains".to_string(),
+                entity_context: None,
+            })?;
+
+        const CONTAINMENT_THRESHOLD: f64 = 0.1;
+
+        if rows.is_empty() {
+            let dummy_row = ResultRow { columns: HashMap::new() };
+            let pos1 = self.extract_position(geometry1_expr, &dummy_row, evaluator)?;
+            let pos2 = self.extract_position(geometry2_expr, &dummy_row, evaluator)?;
+
+            let distance = self.calculate_hyperbolic_distance(&pos1, &pos2)?;
+            let is_contained = distance < CONTAINMENT_THRESHOLD;
+
+            let mut result_columns = HashMap::new();
+            result_columns.insert("is_contained".to_string(), Value::Bool(is_contained));
+            result_columns.insert("distance".to_string(), Value::Distance(HyperbolicDistance(distance)));
+
+            return Ok(vec![ResultRow { columns: result_columns }]);
+        }
+
+        let mut result_rows = Vec::new();
+        for row in rows {
+            let pos1 = self.extract_position(geometry1_expr, &row, evaluator)?;
+            let pos2 = self.extract_position(geometry2_expr, &row, evaluator)?;
+
+            let distance = self.calculate_hyperbolic_distance(&pos1, &pos2)?;
+            let is_contained = distance < CONTAINMENT_THRESHOLD;
+
+            if is_contained {
+                let mut result_columns = row.columns.clone();
+                result_columns.insert("is_contained".to_string(), Value::Bool(true));
+                result_columns.insert("containment_distance".to_string(), Value::Distance(HyperbolicDistance(distance)));
+                result_rows.push(ResultRow { columns: result_columns });
+            }
+        }
+
+        Ok(result_rows)
     }
 
     fn execute_intersects(
         &self,
-        _params: &HashMap<String, CompiledExpression>,
-        _rows: Vec<ResultRow>,
-        _evaluator: &mut ExpressionEvaluator,
+        params: &HashMap<String, CompiledExpression>,
+        rows: Vec<ResultRow>,
+        evaluator: &mut ExpressionEvaluator,
     ) -> Result<Vec<ResultRow>> {
-        Err(HyperQLError::ExecutionError { message: "Intersects operation not yet implemented".to_string(), operation: "geometric_operation".to_string(), entity_context: None })
+        let geometry1_expr = params.get("geometry1")
+            .ok_or_else(|| HyperQLError::ExecutionError {
+                message: "Missing 'geometry1' parameter for intersects".to_string(),
+                operation: "intersects".to_string(),
+                entity_context: None,
+            })?;
+        let geometry2_expr = params.get("geometry2")
+            .ok_or_else(|| HyperQLError::ExecutionError {
+                message: "Missing 'geometry2' parameter for intersects".to_string(),
+                operation: "intersects".to_string(),
+                entity_context: None,
+            })?;
+
+        const INTERSECTION_THRESHOLD: f64 = 1.0;
+
+        if rows.is_empty() {
+            let dummy_row = ResultRow { columns: HashMap::new() };
+            let pos1 = self.extract_position(geometry1_expr, &dummy_row, evaluator)?;
+            let pos2 = self.extract_position(geometry2_expr, &dummy_row, evaluator)?;
+
+            let distance = self.calculate_hyperbolic_distance(&pos1, &pos2)?;
+            let intersects = distance < INTERSECTION_THRESHOLD;
+
+            let mut result_columns = HashMap::new();
+            result_columns.insert("intersects".to_string(), Value::Bool(intersects));
+            result_columns.insert("distance".to_string(), Value::Distance(HyperbolicDistance(distance)));
+
+            return Ok(vec![ResultRow { columns: result_columns }]);
+        }
+
+        let mut result_rows = Vec::new();
+        for row in rows {
+            let pos1 = self.extract_position(geometry1_expr, &row, evaluator)?;
+            let pos2 = self.extract_position(geometry2_expr, &row, evaluator)?;
+
+            let distance = self.calculate_hyperbolic_distance(&pos1, &pos2)?;
+            let intersects = distance < INTERSECTION_THRESHOLD;
+
+            if intersects {
+                let mut result_columns = row.columns.clone();
+                result_columns.insert("intersects".to_string(), Value::Bool(true));
+                result_columns.insert("intersection_distance".to_string(), Value::Distance(HyperbolicDistance(distance)));
+                result_rows.push(ResultRow { columns: result_columns });
+            }
+        }
+
+        Ok(result_rows)
     }
 
     fn extract_position(
