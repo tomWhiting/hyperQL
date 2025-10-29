@@ -1,14 +1,23 @@
 //! # Function Registry - UDF Management and Versioning
 //!
-//! The function registry manages user-defined functions across the HyperQL system,
-//! providing versioning, metadata storage, and efficient function lookup for both
-//! Lua and WebAssembly functions.
+//! The function registry provides metadata types and interfaces for user-defined functions.
+//!
+//! ## Registry Provided by Embedding Application
+//!
+//! HyperQL is designed as an embeddable query language. Function registry functionality
+//! is provided by the embedding application (e.g., Hyperspatial), not by HyperQL itself.
+//!
+//! This module defines the data structures and types that the embedding application uses
+//! to manage UDFs. The actual storage, versioning, and lookup is handled externally.
 
 use super::RuntimeResult;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
 /// Central registry for managing user-defined functions
+///
+/// This is a metadata structure. Actual function registration and lookup
+/// is handled by the embedding application.
 #[allow(dead_code)]
 pub struct FunctionRegistry {
     /// Function storage by name and version
@@ -49,7 +58,7 @@ pub enum FunctionImplementation {
     /// WebAssembly bytecode
     Wasm(Vec<u8>),
     /// Built-in native function
-    Native(String), // Function identifier for native implementations
+    Native(String),
 }
 
 /// Function metadata and signature information
@@ -98,7 +107,7 @@ pub enum TypeDefinition {
     Object(HashMap<String, TypeDefinition>),
     /// Hyperbolic-specific types
     Position,
-    Vector(Option<usize>), // Optional dimension specification
+    Vector(Option<usize>),
     Distance,
     /// Generic types
     Any,
@@ -137,23 +146,23 @@ pub struct PerformanceHints {
 /// Computational complexity classification
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComputationalComplexity {
-    Constant,      // O(1)
-    Logarithmic,   // O(log n)
-    Linear,        // O(n)
-    Linearithmic,  // O(n log n)
-    Quadratic,     // O(n²)
-    Exponential,   // O(2^n)
+    Constant,
+    Logarithmic,
+    Linear,
+    Linearithmic,
+    Quadratic,
+    Exponential,
     Unknown,
 }
 
 /// Memory usage classification
 #[derive(Debug, Clone, PartialEq)]
 pub enum MemoryUsage {
-    Minimal,    // < 1KB
-    Low,        // 1KB - 1MB
-    Moderate,   // 1MB - 10MB
-    High,       // 10MB - 100MB
-    VeryHigh,   // > 100MB
+    Minimal,
+    Low,
+    Moderate,
+    High,
+    VeryHigh,
 }
 
 /// Security level for function execution
@@ -178,104 +187,67 @@ impl FunctionRegistry {
             metadata_cache: HashMap::new(),
         }
     }
-    
+
     /// Register a new function or version
+    ///
+    /// Function registration is handled by the embedding application.
+    /// This returns an error indicating external registration is required.
     pub fn register_function(
         &mut self,
         _implementation: FunctionImplementation,
         metadata: FunctionMetadata,
     ) -> RuntimeResult<u32> {
-        // TODO: Validate function metadata
-        // TODO: Check for naming conflicts
-        // TODO: Assign version number
-        // TODO: Store function and metadata
-        // TODO: Update default version if appropriate
-        
-        todo!("Register function: {}", metadata.name)
+        use super::RuntimeError;
+
+        Err(RuntimeError::FunctionNotFound(format!(
+            "Function registration is handled by embedding application. \
+             Function '{}' should be registered via DataSource API.",
+            metadata.name
+        )))
     }
-    
+
     /// Get function by name (uses default version)
+    ///
+    /// Function lookup is handled by the embedding application.
     pub fn get_function(&self, name: &str) -> RuntimeResult<&FunctionVersion> {
-        // TODO: Look up default version
-        // TODO: Return function implementation
-        
-        todo!("Get function: {}", name)
+        use super::RuntimeError;
+
+        Err(RuntimeError::FunctionNotFound(format!(
+            "Function lookup is handled by embedding application. \
+             Function '{}' should be accessed via DataSource API.",
+            name
+        )))
     }
-    
+
     /// Get specific function version
     pub fn get_function_version(&self, name: &str, version: u32) -> RuntimeResult<&FunctionVersion> {
-        // TODO: Look up specific version
-        // TODO: Return function implementation
-        
-        todo!("Get function version: {} v{}", name, version)
+        use super::RuntimeError;
+
+        Err(RuntimeError::FunctionNotFound(format!(
+            "Function lookup is handled by embedding application. \
+             Function '{}' version {} should be accessed via DataSource API.",
+            name, version
+        )))
     }
-    
+
     /// List all available functions
     pub fn list_functions(&self) -> Vec<FunctionSummary> {
-        // TODO: Generate summary list of all functions
-        // TODO: Include version information and metadata
-        
-        todo!("List all functions")
+        Vec::new()
     }
-    
+
     /// Search functions by category or tags
     pub fn search_functions(
         &self,
         _category: Option<FunctionCategory>,
         _tags: Option<&[String]>,
     ) -> Vec<FunctionSummary> {
-        // TODO: Filter functions by category and tags
-        // TODO: Return matching function summaries
-        
-        todo!("Search functions")
+        Vec::new()
     }
-    
-    /// Update default version for a function
-    pub fn set_default_version(&mut self, name: &str, version: u32) -> RuntimeResult<()> {
-        // TODO: Validate version exists
-        // TODO: Update default version mapping
-        
-        todo!("Set default version for: {} to v{}", name, version)
-    }
-    
-    /// Mark a function version as deprecated
-    pub fn deprecate_version(&mut self, name: &str, version: u32) -> RuntimeResult<()> {
-        // TODO: Find function version
-        // TODO: Mark as deprecated
-        // TODO: Update metadata cache
-        
-        todo!("Deprecate function: {} v{}", name, version)
-    }
-    
-    /// Remove a function version
-    pub fn remove_version(&mut self, name: &str, version: u32) -> RuntimeResult<()> {
-        // TODO: Check if version is in use
-        // TODO: Remove from storage
-        // TODO: Update default version if necessary
-        // TODO: Clean up metadata cache
-        
-        todo!("Remove function: {} v{}", name, version)
-    }
-    
-    /// Validate function signature compatibility
-    pub fn validate_signature(
-        &self,
-        name: &str,
-        _args: &[TypeDefinition],
-    ) -> RuntimeResult<TypeDefinition> {
-        // TODO: Get function metadata
-        // TODO: Check parameter count and types
-        // TODO: Return expected return type
-        
-        todo!("Validate signature for: {}", name)
-    }
-    
-    /// Get function usage statistics
-    pub fn get_function_stats(&self, name: &str) -> RuntimeResult<FunctionStats> {
-        // TODO: Retrieve usage statistics
-        // TODO: Include performance metrics
-        
-        todo!("Get stats for: {}", name)
+}
+
+impl Default for FunctionRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -310,12 +282,3 @@ pub struct MemoryStats {
     pub average_memory_bytes: usize,
     pub total_allocations: u64,
 }
-
-// TODO: Implement function persistence to disk
-// TODO: Add function dependency tracking
-// TODO: Implement function hot-reloading
-// TODO: Add function testing and validation framework
-// TODO: Implement function documentation generation
-// TODO: Add function performance benchmarking
-// TODO: Implement function access control and permissions
-// TODO: Add function usage analytics and reporting

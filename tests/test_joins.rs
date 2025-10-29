@@ -338,7 +338,6 @@ fn test_join_with_limit() {
 }
 
 #[test]
-#[ignore] // TODO: GROUP BY with JOINs needs column name resolution fix
 fn test_join_with_aggregates() {
     let data_source = setup_test_data();
     let mut executor = Executor::new(Box::new(data_source));
@@ -357,7 +356,12 @@ fn test_join_with_aggregates() {
 
     // Check counts (with alias prefix)
     for row in &result.rows {
-        if let Some(Value::Int(subject_id)) = row.columns.get("p_subject_id").or_else(|| row.columns.get("subject_id")) {
+        // Try different possible column name formats
+        let subject_id_value = row.columns.get("p_subject_id")
+            .or_else(|| row.columns.get("subject_id"))
+            .or_else(|| row.columns.get("p.subject_id"));
+
+        if let Some(Value::Int(subject_id)) = subject_id_value {
             if *subject_id == 1 {
                 // Patient 1 has 2 admissions
                 let count = row.columns.get("COUNT(*)").or_else(|| row.columns.get("count")).unwrap();
@@ -484,6 +488,48 @@ fn test_mixed_join_types() {
     // The INNER JOIN will filter out rows where hadm_id is NULL
     // So we should only get rows where both admissions and chartevents exist
     assert!(result.rows.len() > 0);
+}
+
+#[test]
+fn test_join_with_aggregates_column_names() {
+    let data_source = setup_test_data();
+    let mut executor = Executor::new(Box::new(data_source));
+    let compiler = Compiler::new();
+
+    let query = "SELECT p.subject_id, COUNT(*) FROM patients.Patient p \
+                 INNER JOIN admissions.Admission a ON p.subject_id = a.subject_id \
+                 GROUP BY p.subject_id";
+    let statement = parse_statement(query).unwrap();
+    let compiled = compiler.compile(statement).unwrap();
+
+    let result = executor.execute(compiled).unwrap();
+
+    // Should have 2 groups
+    assert_eq!(result.rows.len(), 2);
+
+    // CRITICAL: Verify column names are preserved from SELECT list, NOT generic group_0, group_1
+    for row in &result.rows {
+        let column_names: Vec<_> = row.columns.keys().cloned().collect();
+
+        // Must NOT contain generic names like "group_0" or "group_1"
+        assert!(!column_names.iter().any(|name| name.starts_with("group_")),
+                "Found generic group_N column name: {:?}", column_names);
+
+        // MUST contain either "p.subject_id" or "p_subject_id" (with table prefix)
+        let has_subject_id = column_names.iter().any(|name|
+            name == "p.subject_id" || name == "p_subject_id" || name == "subject_id"
+        );
+        assert!(has_subject_id, "Missing subject_id column. Found: {:?}", column_names);
+
+        // MUST contain "COUNT(*)" (proper aggregate function naming)
+        let has_count = column_names.iter().any(|name|
+            name == "COUNT(*)" || name == "count"
+        );
+        assert!(has_count, "Missing COUNT(*) column. Found: {:?}", column_names);
+
+        // Print column names for manual verification
+        println!("Row column names: {:?}", column_names);
+    }
 }
 
 #[test]

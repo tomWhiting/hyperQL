@@ -225,6 +225,10 @@ pub enum ExecutionPlan {
         params: std::collections::HashMap<String, CompiledExpression>,
         input: Option<Box<ExecutionPlan>>,
     },
+    /// Schema DDL operation plan
+    Schema {
+        operation: crate::ast::schema::SchemaOperation,
+    },
 }
 
 /// Compiled expression
@@ -404,13 +408,29 @@ impl Compiler {
                     estimated_cost,
                 });
             },
-            Statement::Schema(_schema_op) => {
-                // TODO: Implement schema DDL compilation
-                // Schema statements need to be compiled into SchemaEngine operations
-                // for creating, altering, and dropping schemas
-                return Err(HyperQLError::SemanticError {
-                    message: "Schema DDL compilation not yet implemented".to_string(),
-                    context: vec!["Schema operations will be supported in a future release".to_string()],
+            Statement::Schema(schema_op) => {
+                // Schema compilation is straightforward - just wrap in execution plan
+                // The actual schema validation and creation happens in the executor
+                let plan = ExecutionPlan::Schema {
+                    operation: schema_op.clone(),
+                };
+                let metadata = QueryMetadata {
+                    tables_accessed: vec![],
+                    columns_accessed: vec![],
+                    functions_used: vec![],
+                    requires_spatial_index: false,
+                    requires_vector_index: false,
+                };
+                let estimated_cost = ExecutionCost {
+                    estimated_rows: 0,
+                    estimated_cpu_cost: 0.1,
+                    estimated_memory_mb: 0.5,
+                    estimated_io_ops: 1,
+                };
+                return Ok(CompiledQuery {
+                    plan,
+                    metadata,
+                    estimated_cost,
                 });
             },
             Statement::Stream(_stream_op) => {
@@ -999,6 +1019,188 @@ mod tests {
                 }
             }
             other => panic!("Expected LIMIT plan, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_compile_geometric_near_query() {
+        let compiler = Compiler::new();
+        let query = "SELECT * FROM docs.Document WHERE position NEAR origin WITHIN 2.0";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Should generate GeometricOperation plan (not Filter plan)
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::GeometricOperation { op_type, params, input } => {
+                        // Parser creates "near" function which maps to NearPositions
+                        assert!(matches!(op_type, GeometricOpType::NearPositions));
+                        assert!(params.contains_key("reference"));
+                        assert!(params.contains_key("radius"));
+                        assert!(input.is_some());
+                    }
+                    other => panic!("Expected GeometricOperation as input to project, got: {:?}", other),
+                }
+            }
+            _ => panic!("Expected PROJECT plan with GeometricOperation input"),
+        }
+    }
+
+    #[test]
+    fn test_compile_geometric_distance_query() {
+        let compiler = Compiler::new();
+        // Use ORDER BY with DISTANCE which the parser supports
+        let query = "SELECT * FROM entities.Position ORDER BY position DISTANCE FROM origin LIMIT 10";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Should generate GeometricOperation plan for distance-based ordering
+        // Note: This becomes a k-NN pattern which might use VectorOperation or Sort
+        // Let's check what plan is generated
+        match &compiled.plan {
+            ExecutionPlan::Limit { input, .. } => {
+                // Could be Sort or GeometricOperation depending on optimization
+                match input.as_ref() {
+                    ExecutionPlan::Sort { .. } => {
+                        // OK - distance ordering compiled to sort
+                    }
+                    ExecutionPlan::GeometricOperation { op_type, params, .. } => {
+                        assert!(matches!(op_type, GeometricOpType::HyperbolicDistance));
+                        assert!(params.contains_key("entity1"));
+                        assert!(params.contains_key("entity2"));
+                    }
+                    other => panic!("Expected Sort or GeometricOperation, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected LIMIT plan, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_regular_where_clause_not_geometric() {
+        let compiler = Compiler::new();
+        let query = "SELECT * FROM docs.Document WHERE title = 'test'";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Should generate regular Filter plan (not GeometricOperation)
+        match &compiled.plan {
+            ExecutionPlan::Project { input, .. } => {
+                match input.as_ref() {
+                    ExecutionPlan::Filter { .. } => {
+                        // Correct - regular filter for non-geometric WHERE clause
+                    }
+                    ExecutionPlan::GeometricOperation { .. } => {
+                        panic!("Should not generate GeometricOperation for non-geometric WHERE clause");
+                    }
+                    other => panic!("Expected Filter, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected PROJECT plan, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_compile_create_schema() {
+        let compiler = Compiler::new();
+        let query = "CREATE SCHEMA documents (title STRING REQUIRED, content STRING)";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        // Verify Schema execution plan
+        match &compiled.plan {
+            ExecutionPlan::Schema { operation } => {
+                use crate::ast::schema::SchemaOperation;
+                match operation {
+                    SchemaOperation::Create(create_op) => {
+                        assert_eq!(create_op.collection_name, "documents");
+                        assert_eq!(create_op.fields.len(), 2);
+                    }
+                    _ => panic!("Expected CREATE schema operation"),
+                }
+            }
+            _ => panic!("Expected Schema execution plan"),
+        }
+
+        // Verify metadata - Schema operations have empty tables_accessed in initial metadata
+        // (the actual collection name is in the operation itself)
+        assert_eq!(compiled.metadata.tables_accessed.len(), 0);
+        assert_eq!(compiled.estimated_cost.estimated_rows, 0);
+        assert_eq!(compiled.estimated_cost.estimated_cpu_cost, 0.1);
+    }
+
+    #[test]
+    fn test_compile_alter_schema() {
+        let compiler = Compiler::new();
+        let query = "ALTER SCHEMA documents ADD FIELD author STRING";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        match &compiled.plan {
+            ExecutionPlan::Schema { operation } => {
+                use crate::ast::schema::SchemaOperation;
+                match operation {
+                    SchemaOperation::Alter(alter_op) => {
+                        assert_eq!(alter_op.collection_name, "documents");
+                    }
+                    _ => panic!("Expected ALTER schema operation"),
+                }
+            }
+            _ => panic!("Expected Schema execution plan"),
+        }
+
+        // Schema operations have empty tables_accessed in initial metadata
+        assert_eq!(compiled.metadata.tables_accessed.len(), 0);
+    }
+
+    #[test]
+    fn test_compile_drop_schema() {
+        let compiler = Compiler::new();
+        let query = "DROP SCHEMA documents";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        match &compiled.plan {
+            ExecutionPlan::Schema { operation } => {
+                use crate::ast::schema::SchemaOperation;
+                match operation {
+                    SchemaOperation::Drop(drop_op) => {
+                        assert_eq!(drop_op.collection_name, "documents");
+                    }
+                    _ => panic!("Expected DROP schema operation"),
+                }
+            }
+            _ => panic!("Expected Schema execution plan"),
+        }
+    }
+
+    #[test]
+    fn test_compile_describe_schema() {
+        let compiler = Compiler::new();
+        let query = "DESCRIBE SCHEMA documents";
+        let statement = parse_statement(query).unwrap();
+
+        let compiled = compiler.compile(statement).unwrap();
+
+        match &compiled.plan {
+            ExecutionPlan::Schema { operation } => {
+                use crate::ast::schema::SchemaOperation;
+                match operation {
+                    SchemaOperation::Describe(describe_op) => {
+                        assert_eq!(describe_op.collection_name, "documents");
+                        assert!(!describe_op.detailed);
+                    }
+                    _ => panic!("Expected DESCRIBE schema operation"),
+                }
+            }
+            _ => panic!("Expected Schema execution plan"),
         }
     }
 }

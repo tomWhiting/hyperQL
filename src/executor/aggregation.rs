@@ -36,24 +36,35 @@ impl AggregationEngine {
         }
 
         let mut result = Vec::new();
-        for (group_key_str, group_rows) in groups {
+        for (_group_key_str, group_rows) in groups {
             let mut aggregated_columns = HashMap::new();
 
-            for (i, _group_expr) in group_expressions.iter().enumerate() {
-                aggregated_columns.insert(
-                    format!("group_{}", i),
-                    Value::String(group_key_str.clone()),
-                );
+            // Extract actual group values from the first row in the group
+            // This preserves the original column names and values
+            if let Some(first_row) = group_rows.first() {
+                for group_expr in group_expressions {
+                    let group_value = evaluator.evaluate_expression(group_expr, first_row)?;
+                    let column_name = self.extract_column_name(group_expr, aggregate_expressions);
+                    aggregated_columns.insert(column_name, group_value);
+                }
             }
 
             for aggregate_projection in aggregate_expressions {
-                let agg_value = self.evaluate_aggregate(&aggregate_projection.expression, &group_rows, evaluator)?;
-                let column_name = if let Some(ref alias) = aggregate_projection.alias {
-                    alias.clone()
-                } else {
-                    format!("agg_{}", aggregated_columns.len())
-                };
-                aggregated_columns.insert(column_name.clone(), agg_value);
+                // Skip if this projection is actually a GROUP BY column
+                // (we already added it above with the correct value)
+                let is_group_column = group_expressions.iter().any(|group_expr| {
+                    self.expressions_match(group_expr, &aggregate_projection.expression)
+                });
+
+                if !is_group_column {
+                    let agg_value = self.evaluate_aggregate(&aggregate_projection.expression, &group_rows, evaluator)?;
+                    let column_name = if let Some(ref alias) = aggregate_projection.alias {
+                        alias.clone()
+                    } else {
+                        aggregate_projection.output_name.clone()
+                    };
+                    aggregated_columns.insert(column_name.clone(), agg_value);
+                }
             }
 
             result.push(ResultRow { columns: aggregated_columns });
@@ -82,6 +93,61 @@ impl AggregationEngine {
         }
 
         Ok(vec![ResultRow { columns: aggregated_columns }])
+    }
+
+    /// Extract a meaningful column name from a CompiledExpression
+    ///
+    /// For GROUP BY columns, we need to preserve the original column names
+    /// that match the SELECT list. This function extracts the column name
+    /// from the expression, handling simple columns, qualified columns,
+    /// and complex expressions.
+    fn extract_column_name(
+        &self,
+        expr: &CompiledExpression,
+        aggregate_expressions: &[CompiledProjection],
+    ) -> String {
+        // First, try to find this expression in the aggregate_expressions
+        // If found, use its output_name (which comes from the SELECT list)
+        for agg_proj in aggregate_expressions {
+            if self.expressions_match(expr, &agg_proj.expression) {
+                return agg_proj.output_name.clone();
+            }
+        }
+
+        // If not found in aggregate expressions, generate a name from the expression itself
+        match expr {
+            CompiledExpression::Column { table, name, .. } => {
+                if let Some(table_name) = table {
+                    format!("{}_{}", table_name, name)
+                } else {
+                    name.clone()
+                }
+            }
+            CompiledExpression::Function { name, .. } => {
+                format!("{}()", name)
+            }
+            _ => "expr".to_string(),
+        }
+    }
+
+    /// Check if two expressions are semantically equivalent
+    /// Used to match GROUP BY expressions with SELECT list expressions
+    fn expressions_match(&self, expr1: &CompiledExpression, expr2: &CompiledExpression) -> bool {
+        match (expr1, expr2) {
+            (
+                CompiledExpression::Column { table: t1, name: n1, .. },
+                CompiledExpression::Column { table: t2, name: n2, .. }
+            ) => t1 == t2 && n1 == n2,
+            (
+                CompiledExpression::Function { name: n1, args: a1, .. },
+                CompiledExpression::Function { name: n2, args: a2, .. }
+            ) => {
+                n1 == n2 && a1.len() == a2.len() &&
+                a1.iter().zip(a2.iter()).all(|(arg1, arg2)| self.expressions_match(arg1, arg2))
+            }
+            (CompiledExpression::Literal(v1), CompiledExpression::Literal(v2)) => v1 == v2,
+            _ => false,
+        }
     }
 
     fn evaluate_aggregate(

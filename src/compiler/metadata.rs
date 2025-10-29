@@ -179,6 +179,33 @@ impl MetadataGenerator {
                     self.collect_metadata(input_plan, metadata);
                 }
             }
+            ExecutionPlan::Schema { operation } => {
+                // Schema operations access collections but not in the traditional query sense
+                // Track the collection name for context
+                use crate::ast::schema::SchemaOperation;
+                match operation {
+                    SchemaOperation::Create(create_op) => {
+                        if !metadata.tables_accessed.contains(&create_op.collection_name) {
+                            metadata.tables_accessed.push(create_op.collection_name.clone());
+                        }
+                    }
+                    SchemaOperation::Drop(drop_op) => {
+                        if !metadata.tables_accessed.contains(&drop_op.collection_name) {
+                            metadata.tables_accessed.push(drop_op.collection_name.clone());
+                        }
+                    }
+                    SchemaOperation::Alter(alter_op) => {
+                        if !metadata.tables_accessed.contains(&alter_op.collection_name) {
+                            metadata.tables_accessed.push(alter_op.collection_name.clone());
+                        }
+                    }
+                    SchemaOperation::Describe(describe_op) => {
+                        if !metadata.tables_accessed.contains(&describe_op.collection_name) {
+                            metadata.tables_accessed.push(describe_op.collection_name.clone());
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -420,6 +447,15 @@ impl CostEstimator {
                     }
                 } else {
                     base_cost
+                }
+            }
+            ExecutionPlan::Schema { .. } => {
+                // Schema DDL operations are lightweight metadata operations
+                ExecutionCost {
+                    estimated_rows: 0,
+                    estimated_cpu_cost: 0.1,
+                    estimated_memory_mb: 0.5,
+                    estimated_io_ops: 1,
                 }
             }
         }

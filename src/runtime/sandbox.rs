@@ -1,8 +1,18 @@
 //! # Security Sandbox - Runtime Isolation and Resource Management
 //!
-//! The sandbox module provides comprehensive security isolation for user-defined functions,
-//! implementing resource limits, access controls, and monitoring to ensure safe execution
-//! of untrusted code within the HyperQL runtime environment.
+//! The sandbox module provides security types and resource limit definitions.
+//!
+//! ## Sandboxing Provided by Embedding Application
+//!
+//! HyperQL is designed as an embeddable query language. Security sandboxing is provided
+//! by the embedding application (e.g., Hyperspatial), not by HyperQL itself.
+//!
+//! When HyperQL is embedded in Hyperspatial:
+//! - Lua sandbox uses mlua with removed dangerous globals (io, os, etc.)
+//! - WASM sandbox uses Wasmtime with fuel metering and memory limits
+//! - Resource limits are enforced by the compute engines
+//!
+//! This module defines the types and limits that the embedding application uses.
 
 use super::{RuntimeResult, RuntimeError, RuntimeConfig};
 use std::time::{Duration, Instant};
@@ -148,13 +158,13 @@ impl SecuritySandbox {
         let limits = ResourceLimits {
             max_memory_bytes: config.max_memory_bytes,
             max_execution_time: Duration::from_millis(config.max_execution_time_ms),
-            max_cpu_percent: 80.0, // 80% CPU limit
+            max_cpu_percent: 80.0,
             max_function_calls: 10_000,
             max_recursion_depth: config.max_stack_depth as u32,
-            max_file_descriptors: 0, // No file access by default
-            max_network_connections: 0, // No network access by default
+            max_file_descriptors: 0,
+            max_network_connections: 0,
         };
-        
+
         let policies = SecurityPolicies {
             allow_file_access: false,
             allow_network_access: false,
@@ -164,7 +174,7 @@ impl SecuritySandbox {
             allowed_syscalls: Vec::new(),
             allow_debugging: false,
         };
-        
+
         Self {
             limits,
             usage: ResourceUsage::default(),
@@ -172,33 +182,31 @@ impl SecuritySandbox {
             monitor: ExecutionMonitor::default(),
         }
     }
-    
+
     /// Begin sandboxed execution
+    ///
+    /// Sandbox enforcement is handled by the embedding application.
     pub fn begin_execution(&mut self, context: SandboxContext) -> RuntimeResult<SandboxGuard<'_>> {
-        // TODO: Initialize resource tracking
-        // TODO: Set up monitoring hooks
-        // TODO: Install security policies
-        // TODO: Create execution guard
-        
         self.usage.execution_start = Some(Instant::now());
         self.usage.function_calls = 0;
         self.usage.recursion_depth = 0;
-        
-        todo!("Begin sandboxed execution for: {}", context.function_name)
+
+        Ok(SandboxGuard {
+            sandbox: self,
+            context,
+        })
     }
-    
+
     /// Check if resource limits are being respected
     pub fn check_resource_limits(&mut self) -> RuntimeResult<()> {
-        // Check memory usage
         if self.usage.memory_bytes > self.limits.max_memory_bytes {
             self.record_violation(ViolationType::ResourceLimitExceeded(ResourceType::Memory));
             return Err(RuntimeError::ResourceLimitExceeded(
-                format!("Memory limit exceeded: {} > {}", 
+                format!("Memory limit exceeded: {} > {}",
                     self.usage.memory_bytes, self.limits.max_memory_bytes)
             ));
         }
-        
-        // Check execution time
+
         if let Some(start_time) = self.usage.execution_start {
             let elapsed = start_time.elapsed();
             if elapsed > self.limits.max_execution_time {
@@ -209,60 +217,16 @@ impl SecuritySandbox {
                 ));
             }
         }
-        
-        // TODO: Check CPU usage
-        // TODO: Check function call count
-        // TODO: Check recursion depth
-        // TODO: Check file descriptor usage
-        // TODO: Check network connection count
-        
+
         Ok(())
     }
-    
-    /// Validate file access attempt
-    pub fn validate_file_access(&mut self, path: &str) -> RuntimeResult<()> {
-        if !self.policies.allow_file_access {
-            self.record_violation(ViolationType::UnauthorizedFileAccess(path.to_string()));
-            return Err(RuntimeError::SecurityViolation(
-                format!("File access not permitted: {}", path)
-            ));
-        }
-        
-        // TODO: Check allowed paths whitelist
-        // TODO: Validate path safety (no directory traversal)
-        // TODO: Check file descriptor limits
-        
-        todo!("Validate file access: {}", path)
-    }
-    
-    /// Validate network access attempt
-    pub fn validate_network_access(&mut self, host: &str, port: u16) -> RuntimeResult<()> {
-        if !self.policies.allow_network_access {
-            self.record_violation(ViolationType::UnauthorizedNetworkAccess(
-                format!("{}:{}", host, port)
-            ));
-            return Err(RuntimeError::SecurityViolation(
-                format!("Network access not permitted: {}:{}", host, port)
-            ));
-        }
-        
-        // TODO: Check allowed hosts whitelist
-        // TODO: Check connection limits
-        // TODO: Validate host safety (no internal networks)
-        
-        todo!("Validate network access: {}:{}", host, port)
-    }
-    
+
     /// Record a security violation
     fn record_violation(&mut self, violation: ViolationType) {
         self.monitor.violations_count += 1;
         self.monitor.violation_types.push(violation);
-        
-        // TODO: Log security violation
-        // TODO: Notify security monitoring system
-        // TODO: Consider terminating execution for severe violations
     }
-    
+
     /// Update resource usage statistics
     pub fn update_memory_usage(&mut self, new_usage: usize) {
         self.usage.memory_bytes = new_usage;
@@ -270,43 +234,12 @@ impl SecuritySandbox {
             self.usage.peak_memory_bytes = new_usage;
         }
     }
-    
-    /// Increment function call counter
-    pub fn increment_function_calls(&mut self) -> RuntimeResult<()> {
-        self.usage.function_calls += 1;
-        if self.usage.function_calls > self.limits.max_function_calls {
-            self.record_violation(ViolationType::ResourceLimitExceeded(ResourceType::FunctionCalls));
-            return Err(RuntimeError::ResourceLimitExceeded(
-                "Function call limit exceeded".to_string()
-            ));
-        }
-        Ok(())
-    }
-    
-    /// Track recursion depth
-    pub fn enter_recursion(&mut self) -> RuntimeResult<()> {
-        self.usage.recursion_depth += 1;
-        if self.usage.recursion_depth > self.limits.max_recursion_depth {
-            self.record_violation(ViolationType::ResourceLimitExceeded(ResourceType::RecursionDepth));
-            return Err(RuntimeError::ResourceLimitExceeded(
-                "Recursion depth limit exceeded".to_string()
-            ));
-        }
-        Ok(())
-    }
-    
-    /// Exit recursion level
-    pub fn exit_recursion(&mut self) {
-        if self.usage.recursion_depth > 0 {
-            self.usage.recursion_depth -= 1;
-        }
-    }
-    
+
     /// Get current resource usage statistics
     pub fn get_usage_stats(&self) -> &ResourceUsage {
         &self.usage
     }
-    
+
     /// Get security violation summary
     pub fn get_violation_summary(&self) -> ViolationSummary {
         ViolationSummary {
@@ -324,17 +257,11 @@ pub struct SandboxGuard<'a> {
 }
 
 impl<'a> SandboxGuard<'a> {
-    /// Create a new sandbox guard
-    #[allow(dead_code)]
-    fn new(sandbox: &'a mut SecuritySandbox, context: SandboxContext) -> Self {
-        Self { sandbox, context }
-    }
-    
     /// Get the execution context
     pub fn context(&self) -> &SandboxContext {
         &self.context
     }
-    
+
     /// Check resource limits during execution
     pub fn check_limits(&mut self) -> RuntimeResult<()> {
         self.sandbox.check_resource_limits()
@@ -343,10 +270,6 @@ impl<'a> SandboxGuard<'a> {
 
 impl<'a> Drop for SandboxGuard<'a> {
     fn drop(&mut self) {
-        // TODO: Clean up execution context
-        // TODO: Finalize resource usage tracking
-        // TODO: Generate execution report
-        
         if let Some(start_time) = self.sandbox.usage.execution_start {
             self.sandbox.usage.total_execution_time += start_time.elapsed();
             self.sandbox.usage.execution_start = None;
@@ -361,12 +284,3 @@ pub struct ViolationSummary {
     pub violation_types: Vec<ViolationType>,
     pub warnings_issued: u32,
 }
-
-// TODO: Implement system call interception and filtering
-// TODO: Add network traffic monitoring and analysis
-// TODO: Implement code analysis for injection detection
-// TODO: Add resource usage prediction and early warning
-// TODO: Implement sandbox escape detection
-// TODO: Add execution pattern analysis for anomaly detection
-// TODO: Implement audit logging for all security events
-// TODO: Add integration with external security monitoring systems

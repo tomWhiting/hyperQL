@@ -128,6 +128,118 @@ pub trait DataSource: Send + Sync {
         // Real implementations (RouterDataSource) override this with fast database-level counting
         Ok(self.scan(table, entity_type)?.len())
     }
+
+    /// Create a schema for a collection
+    ///
+    /// # Parameters
+    ///
+    /// * `operation` - CREATE SCHEMA operation with field definitions
+    ///
+    /// # Returns
+    ///
+    /// Result indicating success or failure
+    fn create_schema(&mut self, operation: &crate::ast::schema::CreateSchemaStatement) -> Result<()>;
+
+    /// Drop a schema from a collection
+    ///
+    /// # Parameters
+    ///
+    /// * `operation` - DROP SCHEMA operation with collection name
+    ///
+    /// # Returns
+    ///
+    /// Result indicating success or failure
+    fn drop_schema(&mut self, operation: &crate::ast::schema::DropSchemaStatement) -> Result<()>;
+
+    /// Alter an existing schema
+    ///
+    /// # Parameters
+    ///
+    /// * `operation` - ALTER SCHEMA operation with modifications
+    ///
+    /// # Returns
+    ///
+    /// Result indicating success or failure
+    fn alter_schema(&mut self, operation: &crate::ast::schema::AlterSchemaStatement) -> Result<()>;
+
+    /// Describe a schema (retrieve schema information)
+    ///
+    /// # Parameters
+    ///
+    /// * `operation` - DESCRIBE SCHEMA operation with collection name
+    ///
+    /// # Returns
+    ///
+    /// Schema information as a formatted string or error
+    fn describe_schema(&self, operation: &crate::ast::schema::DescribeSchemaStatement) -> Result<String>;
+
+    /// Execute a Lua function
+    ///
+    /// Lua runtime is provided by the embedding application (e.g., Hyperspatial).
+    /// When HyperQL is embedded in Hyperspatial, this executes via LuaComputeEngine.
+    ///
+    /// # Parameters
+    ///
+    /// * `function_name` - Name of the Lua function to execute
+    /// * `args` - Function arguments as HyperQL Values
+    ///
+    /// # Returns
+    ///
+    /// Result value from function execution, or error if execution fails
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns an error indicating Lua runtime is not available.
+    /// Implementations (e.g., RouterDataSource) should override this with actual compute integration.
+    fn execute_lua_function(
+        &mut self,
+        function_name: &str,
+        _args: Vec<crate::types::Value>,
+    ) -> Result<crate::types::Value> {
+        Err(crate::error::HyperQLError::ExecutionError {
+            message: format!(
+                "Lua runtime not available. Function '{}' requires Hyperspatial RouterDataSource.",
+                function_name
+            ),
+            operation: "execute_lua_function".to_string(),
+            entity_context: None,
+        })
+    }
+
+    /// Execute a WASM function
+    ///
+    /// WASM runtime is provided by the embedding application (e.g., Hyperspatial).
+    /// When HyperQL is embedded in Hyperspatial, this executes via WasmComputeEngine.
+    ///
+    /// # Parameters
+    ///
+    /// * `module_name` - Name of the WASM module containing the function
+    /// * `function_name` - Name of the function to execute within the module
+    /// * `args` - Function arguments as HyperQL Values
+    ///
+    /// # Returns
+    ///
+    /// Result value from function execution, or error if execution fails
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns an error indicating WASM runtime is not available.
+    /// Implementations (e.g., RouterDataSource) should override this with actual compute integration.
+    fn execute_wasm_function(
+        &mut self,
+        module_name: &str,
+        function_name: &str,
+        args: Vec<crate::types::Value>,
+    ) -> Result<crate::types::Value> {
+        Err(crate::error::HyperQLError::ExecutionError {
+            message: format!(
+                "WASM runtime not available. Function '{}/{}' requires Hyperspatial RouterDataSource.",
+                module_name, function_name
+            ),
+            operation: "execute_wasm_function".to_string(),
+            entity_context: None,
+        })
+    }
 }
 
 /// Table schema definition

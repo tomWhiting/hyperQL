@@ -134,6 +134,34 @@ impl DataSource for MemoryDataSource {
 
         Ok(results)
     }
+
+    fn create_schema(&mut self, _operation: &crate::ast::schema::CreateSchemaStatement) -> Result<()> {
+        Err(crate::error::HyperQLError::SemanticError {
+            message: "Schema operations not supported by MemoryDataSource".to_string(),
+            context: vec!["Use a persistent DataSource implementation for schema support".to_string()],
+        })
+    }
+
+    fn drop_schema(&mut self, _operation: &crate::ast::schema::DropSchemaStatement) -> Result<()> {
+        Err(crate::error::HyperQLError::SemanticError {
+            message: "Schema operations not supported by MemoryDataSource".to_string(),
+            context: vec!["Use a persistent DataSource implementation for schema support".to_string()],
+        })
+    }
+
+    fn alter_schema(&mut self, _operation: &crate::ast::schema::AlterSchemaStatement) -> Result<()> {
+        Err(crate::error::HyperQLError::SemanticError {
+            message: "Schema operations not supported by MemoryDataSource".to_string(),
+            context: vec!["Use a persistent DataSource implementation for schema support".to_string()],
+        })
+    }
+
+    fn describe_schema(&self, _operation: &crate::ast::schema::DescribeSchemaStatement) -> Result<String> {
+        Err(crate::error::HyperQLError::SemanticError {
+            message: "Schema operations not supported by MemoryDataSource".to_string(),
+            context: vec!["Use a persistent DataSource implementation for schema support".to_string()],
+        })
+    }
 }
 
 impl Default for MemoryDataSource {
