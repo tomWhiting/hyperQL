@@ -2,7 +2,9 @@
 name = "hyperQL"
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0-or-later"
+license = "Apache-2.0"
+repository = "https://github.com/tomWhiting/hyperQL"
+authors = ["Tom Whiting <tom@hyperspatial.com>"]
 description = "Query language for hyperspatial graph databases with temporal and spatial semantics"
 repository = "https://github.com/yourusername/hyperQL"
 readme = "README.md"
