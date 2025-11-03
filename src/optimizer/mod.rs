@@ -210,12 +210,13 @@
 //! advantages of hyperbolic space and multi-paradigm integration for
 //! unprecedented query optimization capabilities.
 
-mod predicate_pushdown;
-mod projection_pushdown;
 mod constant_folding;
 mod expression_simplify;
+mod predicate_pushdown;
+mod projection_pushdown;
+pub mod property_analyzer;
 
-use crate::compiler::{ExecutionPlan, CompiledExpression};
+use crate::compiler::{CompiledExpression, ExecutionPlan};
 use crate::error::Result;
 
 /// Configuration for query optimizer
@@ -281,7 +282,10 @@ impl QueryOptimizer {
     }
 
     /// Optimize with detailed statistics (for debugging and analysis)
-    pub fn optimize_with_stats(&self, plan: ExecutionPlan) -> Result<(ExecutionPlan, OptimizationStats)> {
+    pub fn optimize_with_stats(
+        &self,
+        plan: ExecutionPlan,
+    ) -> Result<(ExecutionPlan, OptimizationStats)> {
         let mut stats = OptimizationStats::default();
         let original_plan = plan.clone();
 
@@ -348,25 +352,60 @@ fn plans_equivalent(plan1: &ExecutionPlan, plan2: &ExecutionPlan) -> bool {
     use std::mem;
 
     match (plan1, plan2) {
-        (ExecutionPlan::Scan { table: t1, entity_type: _et1, alias: _, filter: f1, projection: p1, limit: l1 },
-         ExecutionPlan::Scan { table: t2, entity_type: _et2, alias: _, filter: f2, projection: p2, limit: l2 }) => {
-            t1 == t2 && expressions_equivalent(f1.as_ref(), f2.as_ref()) &&
-            p1.len() == p2.len() && l1 == l2
+        (
+            ExecutionPlan::Scan {
+                table: t1,
+                entity_type: _et1,
+                alias: _,
+                filter: f1,
+                projection: p1,
+                limit: l1,
+            },
+            ExecutionPlan::Scan {
+                table: t2,
+                entity_type: _et2,
+                alias: _,
+                filter: f2,
+                projection: p2,
+                limit: l2,
+            },
+        ) => {
+            t1 == t2
+                && expressions_equivalent(f1.as_ref(), f2.as_ref())
+                && p1.len() == p2.len()
+                && l1 == l2
         }
-        (ExecutionPlan::Filter { input: i1, predicate: p1 },
-         ExecutionPlan::Filter { input: i2, predicate: p2 }) => {
-            plans_equivalent(i1, i2) && expressions_equivalent(Some(p1), Some(p2))
-        }
-        (ExecutionPlan::Project { input: i1, expressions: e1, distinct: d1 },
-         ExecutionPlan::Project { input: i2, expressions: e2, distinct: d2 }) => {
-            plans_equivalent(i1, i2) && e1.len() == e2.len() && d1 == d2
-        }
-        _ => mem::discriminant(plan1) == mem::discriminant(plan2)
+        (
+            ExecutionPlan::Filter {
+                input: i1,
+                predicate: p1,
+            },
+            ExecutionPlan::Filter {
+                input: i2,
+                predicate: p2,
+            },
+        ) => plans_equivalent(i1, i2) && expressions_equivalent(Some(p1), Some(p2)),
+        (
+            ExecutionPlan::Project {
+                input: i1,
+                expressions: e1,
+                distinct: d1,
+            },
+            ExecutionPlan::Project {
+                input: i2,
+                expressions: e2,
+                distinct: d2,
+            },
+        ) => plans_equivalent(i1, i2) && e1.len() == e2.len() && d1 == d2,
+        _ => mem::discriminant(plan1) == mem::discriminant(plan2),
     }
 }
 
 /// Helper function to check if two expressions are equivalent
-fn expressions_equivalent(expr1: Option<&CompiledExpression>, expr2: Option<&CompiledExpression>) -> bool {
+fn expressions_equivalent(
+    expr1: Option<&CompiledExpression>,
+    expr2: Option<&CompiledExpression>,
+) -> bool {
     match (expr1, expr2) {
         (None, None) => true,
         (Some(e1), Some(e2)) => expression_equivalent(e1, e2),
@@ -384,29 +423,47 @@ fn expression_equivalent(expr1: &CompiledExpression, expr2: &CompiledExpression)
             // unless they're exactly the same
             format!("{:?}", v1) == format!("{:?}", v2)
         }
-        (CompiledExpression::Column { name: n1, table: t1, .. },
-         CompiledExpression::Column { name: n2, table: t2, .. }) => {
-            n1 == n2 && t1 == t2
-        }
-        (CompiledExpression::Binary { left: l1, op: op1, right: r1, .. },
-         CompiledExpression::Binary { left: l2, op: op2, right: r2, .. }) => {
-            op1 == op2 && expression_equivalent(l1, l2) && expression_equivalent(r1, r2)
-        }
-        _ => mem::discriminant(expr1) == mem::discriminant(expr2)
+        (
+            CompiledExpression::Column {
+                name: n1,
+                table: t1,
+                ..
+            },
+            CompiledExpression::Column {
+                name: n2,
+                table: t2,
+                ..
+            },
+        ) => n1 == n2 && t1 == t2,
+        (
+            CompiledExpression::Binary {
+                left: l1,
+                op: op1,
+                right: r1,
+                ..
+            },
+            CompiledExpression::Binary {
+                left: l2,
+                op: op2,
+                right: r2,
+                ..
+            },
+        ) => op1 == op2 && expression_equivalent(l1, l2) && expression_equivalent(r1, r2),
+        _ => mem::discriminant(expr1) == mem::discriminant(expr2),
     }
 }
 
+pub use constant_folding::optimize as optimize_constant_folding;
+pub use expression_simplify::optimize as optimize_expression_simplify;
 /// Export the main types for use by other modules
 pub use predicate_pushdown::optimize as optimize_predicate_pushdown;
 pub use projection_pushdown::optimize as optimize_projection_pushdown;
-pub use constant_folding::optimize as optimize_constant_folding;
-pub use expression_simplify::optimize as optimize_expression_simplify;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::{CompiledExpression, CompiledProjection, ValueType};
     use crate::ast::BinaryOperator;
+    use crate::compiler::{CompiledExpression, CompiledProjection, ValueType};
     use crate::types::Value;
 
     fn create_simple_scan() -> ExecutionPlan {
@@ -448,10 +505,22 @@ mod tests {
         };
 
         let optimizer = QueryOptimizer::with_config(config.clone());
-        assert_eq!(optimizer.config.enable_predicate_pushdown, config.enable_predicate_pushdown);
-        assert_eq!(optimizer.config.enable_projection_pushdown, config.enable_projection_pushdown);
-        assert_eq!(optimizer.config.enable_constant_folding, config.enable_constant_folding);
-        assert_eq!(optimizer.config.enable_expression_simplify, config.enable_expression_simplify);
+        assert_eq!(
+            optimizer.config.enable_predicate_pushdown,
+            config.enable_predicate_pushdown
+        );
+        assert_eq!(
+            optimizer.config.enable_projection_pushdown,
+            config.enable_projection_pushdown
+        );
+        assert_eq!(
+            optimizer.config.enable_constant_folding,
+            config.enable_constant_folding
+        );
+        assert_eq!(
+            optimizer.config.enable_expression_simplify,
+            config.enable_expression_simplify
+        );
     }
 
     #[test]
@@ -492,17 +561,16 @@ mod tests {
 
         // The constant expression should be folded
         match optimized {
-            ExecutionPlan::Scan { filter: Some(filter_expr), .. } => {
-                match filter_expr {
-                    CompiledExpression::Binary { right, .. } => {
-                        match right.as_ref() {
-                            CompiledExpression::Literal(Value::Int(5)) => {},
-                            _ => panic!("Expected constant to be folded to 5"),
-                        }
-                    }
-                    _ => panic!("Expected binary expression"),
-                }
-            }
+            ExecutionPlan::Scan {
+                filter: Some(filter_expr),
+                ..
+            } => match filter_expr {
+                CompiledExpression::Binary { right, .. } => match right.as_ref() {
+                    CompiledExpression::Literal(Value::Int(5)) => {}
+                    _ => panic!("Expected constant to be folded to 5"),
+                },
+                _ => panic!("Expected binary expression"),
+            },
             _ => panic!("Expected optimized scan with filter"),
         }
     }
@@ -543,10 +611,13 @@ mod tests {
 
         // Plan should remain unchanged when all optimizations are disabled
         match (filter, optimized) {
-            (ExecutionPlan::Filter { predicate: p1, .. }, ExecutionPlan::Filter { predicate: p2, .. }) => {
+            (
+                ExecutionPlan::Filter { predicate: p1, .. },
+                ExecutionPlan::Filter { predicate: p2, .. },
+            ) => {
                 // The constant expression should NOT be folded
                 match (p1, p2) {
-                    (CompiledExpression::Binary { .. }, CompiledExpression::Binary { .. }) => {},
+                    (CompiledExpression::Binary { .. }, CompiledExpression::Binary { .. }) => {}
                     _ => panic!("Expected both predicates to remain as binary expressions"),
                 }
             }
@@ -603,23 +674,29 @@ mod tests {
 
         // Multiple optimizations should be applied - either constant folding or predicate pushdown
         // Note: The expectation is that at least one optimization should be beneficial for this complex plan
-        assert!(stats.constant_folding_applied || stats.predicate_pushdown_applied,
-                "Expected at least one optimization to be applied. Stats: {:?}", stats);
+        assert!(
+            stats.constant_folding_applied || stats.predicate_pushdown_applied,
+            "Expected at least one optimization to be applied. Stats: {:?}",
+            stats
+        );
         assert!(stats.plan_changed);
 
         // The final plan should have optimizations applied
         match optimized {
             ExecutionPlan::Project { input, .. } => {
                 match input.as_ref() {
-                    ExecutionPlan::Scan { filter: Some(filter_expr), .. } => {
+                    ExecutionPlan::Scan {
+                        filter: Some(filter_expr),
+                        ..
+                    } => {
                         // The constant should be folded and filter pushed down
                         match filter_expr {
-                            CompiledExpression::Binary { right, .. } => {
-                                match right.as_ref() {
-                                    CompiledExpression::Literal(Value::Int(5)) => {},
-                                    _ => println!("Note: Constant may not have been folded as expected"),
+                            CompiledExpression::Binary { right, .. } => match right.as_ref() {
+                                CompiledExpression::Literal(Value::Int(5)) => {}
+                                _ => {
+                                    println!("Note: Constant may not have been folded as expected")
                                 }
-                            }
+                            },
                             _ => println!("Note: Filter structure may have changed"),
                         }
                     }
