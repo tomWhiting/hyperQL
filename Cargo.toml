@@ -6,11 +6,9 @@ license = "Apache-2.0"
 repository = "https://github.com/tomWhiting/hyperQL"
 authors = ["Tom Whiting <tom@hyperspatial.com>"]
 description = "Query language for hyperspatial graph databases with temporal and spatial semantics"
-repository = "https://github.com/yourusername/hyperQL"
 readme = "README.md"
 keywords = ["query-language", "database", "graph", "parser"]
 categories = ["database-implementations", "parser-implementations"]
-authors = ["Your Name <your.email@example.com>"]
 
 [dependencies]
 chrono = { version = "0.4.42", features = ["serde"] }
